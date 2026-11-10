@@ -5,3 +5,11 @@ flash:
 
 sram:
     size: 0x00020000
+
+statusLed: Miscellaneous.LED @ gpioPortD
+
+gpioPortD:
+    12 -> statusLed@0
+
+approveButton: Miscellaneous.Button @ gpioPortA
+    -> gpioPortA@0

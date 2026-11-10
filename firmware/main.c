@@ -51,6 +51,44 @@ static void uart_write(const char *text)
 }
 
 
+
+#define GPIOA_MODER   REG32(0x40020000u)
+#define GPIOA_PUPDR   REG32(0x4002000Cu)
+#define GPIOA_IDR     REG32(0x40020010u)
+
+#define GPIOD_MODER   REG32(0x40020C00u)
+#define GPIOD_OTYPER  REG32(0x40020C04u)
+#define GPIOD_PUPDR   REG32(0x40020C0Cu)
+#define GPIOD_BSRR    REG32(0x40020C18u)
+
+static void gpio_init(void)
+{
+    /* GPIOA ve GPIOD saatlerini etkinlestir. */
+    RCC_AHB1ENR |= (1u << 0) | (1u << 3);
+    (void)RCC_AHB1ENR;
+
+    /* PA0: giris, pull-down; basili buton lojik 1. */
+    GPIOA_MODER &= ~3u;
+    GPIOA_PUPDR = (GPIOA_PUPDR & ~3u) | 2u;
+
+    /* PD12: ilk cikis degeri 0, push-pull, pull yok. */
+    GPIOD_BSRR = (1u << 28);
+    GPIOD_OTYPER &= ~(1u << 12);
+    GPIOD_PUPDR &= ~(3u << 24);
+    GPIOD_MODER = (GPIOD_MODER & ~(3u << 24)) | (1u << 24);
+}
+
+static void led_set(int on)
+{
+    /* BSRR: alt 16 bit set, ust 16 bit reset. */
+    GPIOD_BSRR = on ? (1u << 12) : (1u << 28);
+}
+
+static int button_pressed(void)
+{
+    return (GPIOA_IDR & 1u) != 0u;
+}
+
 static char uart_read_char(void)
 {
     /* RXNE: okunmayi bekleyen bir karakter var mi? */
@@ -70,12 +108,23 @@ static int text_equal(const char *left, const char *right)
     return *left == *right;
 }
 
+
 static void handle_command(const char *command)
 {
     if (text_equal(command, "PING")) {
         uart_write("PONG\r\n");
     } else if (text_equal(command, "STATUS")) {
         uart_write("READY\r\n");
+    } else if (text_equal(command, "LED ON")) {
+        led_set(1);
+        uart_write("OK LED ON\r\n");
+    } else if (text_equal(command, "LED OFF")) {
+        led_set(0);
+        uart_write("OK LED OFF\r\n");
+    } else if (text_equal(command, "BUTTON")) {
+        uart_write(button_pressed()
+            ? "BUTTON PRESSED\r\n"
+            : "BUTTON RELEASED\r\n");
     } else {
         uart_write("ERR UNKNOWN_COMMAND\r\n");
     }
@@ -88,6 +137,7 @@ int main(void)
     int too_long = 0;
     int invalid_character = 0;
 
+    gpio_init();
     uart_init();
     uart_write("Signer firmware started\r\n");
 
