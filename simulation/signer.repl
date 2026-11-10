@@ -1,0 +1,7 @@
+using "platforms/cpus/stm32f4.repl"
+
+flash:
+    size: 0x00100000
+
+sram:
+    size: 0x00020000
