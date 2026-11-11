@@ -1,1 +1,10 @@
 firmware/build/
+
+# KiCad temporary files and local history
+*.kicad_prl
+*.lck
+_autosave-*
+*.bak
+**/.history/
+**/*-backups/
+**/_restore_backup_*/
