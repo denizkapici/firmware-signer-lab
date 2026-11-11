@@ -8,3 +8,9 @@ _autosave-*
 **/.history/
 **/*-backups/
 **/_restore_backup_*/
+
+# Generated test reports
+/robot_output.xml
+/log.html
+/report.html
+/test-results/
