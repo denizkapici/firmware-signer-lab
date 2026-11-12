@@ -37,6 +37,7 @@ Start Direct Client
     ...    --request-id    ${request_id}
     ...    --port    ${PTY_DIR}/uart
     ...    --timeout    60
+    ...    --receipt-out    ${PTY_DIR}/approval.json
     ...    stdout=${PTY_DIR}/client.stdout
     ...    stderr=${PTY_DIR}/client.stderr
     Set Test Variable    ${CLIENT_PROCESS}    ${process}
@@ -87,9 +88,27 @@ Direct Python Client Should Receive Approval
     ${result}=    Check Client Result    APPROVED    0
     Should Contain    ${result.stdout}    Ed25519 imzasi DEMO anahtariyla dogrulandi.
     Execute Command    sysbus.gpioPortA.approveButton Release
+    File Should Exist    ${PTY_DIR}/approval.json
+    Should Contain    ${result.stdout}    Onay belgesi kaydedildi:
+
+    # Remove the simulated device before offline verification.
+    Reset Emulation
+    ${verification}=    Run Process
+    ...    %{SIGNER_HOST_PYTHON=python3}
+    ...    ${CURDIR}/../scripts/signer-client.py
+    ...    ${CURDIR}/../firmware/build/signer.bin
+    ...    --verify-receipt    ${PTY_DIR}/approval.json
+    ...    timeout=10 seconds
+    ...    on_timeout=kill
+    Log    ${verification.stdout}
+    Log    ${verification.stderr}
+    Should Be Equal As Integers    ${verification.rc}    0
+    Should Be Empty    ${verification.stderr}
+    Should Contain    ${verification.stdout}    Dosya ozeti ve Ed25519 imzasi dogrulandi: DEMO ANAHTARI.
 
 Direct Python Client Should Receive Firmware Timeout
     Start Direct Client    D0000002
     Execute Command    emulation RunFor "5.100"
     ${result}=    Check Client Result    TIMEOUT    2
     Should Not Contain    ${result.stdout}    Eslesen APPROVED yaniti alindi
+    File Should Not Exist    ${PTY_DIR}/approval.json
