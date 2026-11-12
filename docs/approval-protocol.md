@@ -138,7 +138,7 @@ a request snapshot between separate invocations.
 
 Run host tests:
 
-    python3 -m unittest discover -s tests -p 'test_signer_client.py' -v
+    python3 -m unittest discover -s tests -p 'test_signer_*.py' -v
 
 Build firmware:
 
@@ -148,7 +148,7 @@ Run Renode tests with the installed Renode test runner:
 
     renode-test tests/signer.robot
 
-The current suite contains 8 Python tests and 18 Renode tests.
+The current suite contains 13 Python tests and 18 Renode tests.
 
 Coverage includes command boundaries, invalid input, timer operation,
 fresh button approval, held-button rejection, short-pulse rejection,
@@ -171,3 +171,14 @@ GitHub Actions runs the host tests, firmware build, and Renode tests.
   The integration test checks firmware responses through Robot Framework.
 - Renode tests validate modeled firmware behavior. They do not prove
   physical PCB operation, electrical integrity, or real button behavior.
+
+## Automated PTY transport tests
+
+Five Python tests use temporary Linux PTYs with a simulated peer.
+They cover fragmented approval responses, mismatched digests,
+final results without PENDING, duplicate PENDING responses,
+and host timeout when the peer is silent.
+
+These tests exercise the Python transport without Renode.
+Direct Python-to-Renode PTY approval and firmware timeout have
+also been checked manually.
