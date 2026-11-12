@@ -29,7 +29,8 @@ jobs:
       - name: Test Python host client
         run: |
           test -f tests/test_signer_client.py
-          python3 -m unittest discover -s tests -p 'test_signer_client.py' -v
+          test -f tests/test_signer_transport.py
+          python3 -m unittest discover -s tests -p 'test_signer_*.py' -v
 
       - name: Build firmware
         run: ./scripts/build-firmware.sh
