@@ -115,8 +115,22 @@ Exit codes:
 - 2: a matching PENDING, CANCELLED, or TIMEOUT was received.
   Argument parsing errors also use exit code 2.
 
-The CLI does not currently open a UART connection.
-The Renode integration test uses Robot Framework for UART transport.
+The CLI supports direct Linux PTY communication through --port:
+
+    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart
+
+The client sends a request, validates the matching PENDING response,
+and waits for a matching APPROVED, CANCELLED, or TIMEOUT response.
+It rejects mismatched IDs or digests and unexpected response sequences.
+
+--timeout sets the host's wall-clock waiting limit (default: 15 seconds).
+The firmware's 5000 ms timeout uses simulated time. These are separate
+limits. A host timeout means the firmware outcome is unknown; it does
+not cancel the pending firmware request.
+
+Direct PTY timeout and approval paths have been tested manually.
+The automated Renode integration test uses Robot Framework for UART
+transport; it does not exercise the Python PTY transport.
 For response checking, the CLI hashes the file again; it does not retain
 a request snapshot between separate invocations.
 

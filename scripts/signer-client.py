@@ -53,6 +53,112 @@ def validate_response(line, request_id, digest):
     return result
 
 
+
+def exchange_uart(port, request_id, digest, timeout):
+    # Linux PTY transport. No additional Python package is required.
+    import os
+    import select
+    import termios
+    import time
+    import tty
+
+    command = build_request(request_id, digest)
+    fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+    old_settings = None
+
+    try:
+        old_settings = termios.tcgetattr(fd)
+        tty.setraw(fd)
+        termios.tcflush(fd, termios.TCIFLUSH)
+
+        deadline = time.monotonic() + timeout
+        outgoing = (command + "\r\n").encode("ascii")
+        offset = 0
+
+        while offset < len(outgoing):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError("UART yazma suresi doldu.")
+
+            _, writable, _ = select.select([], [fd], [], remaining)
+            if not writable:
+                raise ValueError("UART yazma suresi doldu.")
+
+            try:
+                count = os.write(fd, outgoing[offset:])
+            except BlockingIOError:
+                continue
+
+            if count == 0:
+                raise ValueError("UART baglantisi kapandi.")
+            offset += count
+
+        print(f"Gonderildi: {command}", flush=True)
+
+        buffer = bytearray()
+        pending_seen = False
+
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ValueError(
+                    "Host bekleme suresi doldu; firmware sonucu bilinmiyor."
+                )
+
+            readable, _, _ = select.select([fd], [], [], remaining)
+            if not readable:
+                raise ValueError(
+                    "Host bekleme suresi doldu; firmware sonucu bilinmiyor."
+                )
+
+            try:
+                chunk = os.read(fd, 4096)
+            except BlockingIOError:
+                continue
+
+            if not chunk:
+                raise ValueError("UART baglantisi kapandi.")
+
+            for byte in chunk:
+                buffer.append(byte)
+                if len(buffer) > 256:
+                    raise ValueError("UART yaniti izin verilenden uzun.")
+
+                if byte != 10:
+                    continue
+
+                line = buffer.decode("ascii")
+                buffer.clear()
+
+                # Startup can arrive if firmware has just been started.
+                if line == "Signer firmware started\r\n":
+                    continue
+
+                if line.startswith("ERR "):
+                    raise ValueError("Firmware: " + line.rstrip("\r\n"))
+
+                result = validate_response(line, request_id, digest)
+
+                if result == "PENDING":
+                    if pending_seen:
+                        raise ValueError("Tekrarlanan PENDING yaniti.")
+                    pending_seen = True
+                    print("PENDING: buton onayi bekleniyor.", flush=True)
+                    continue
+
+                if not pending_seen:
+                    raise ValueError("PENDING alinmadan sonuc geldi.")
+
+                print("Alindi: " + line.rstrip("\r\n"), flush=True)
+                return line
+    finally:
+        try:
+            if old_settings is not None:
+                termios.tcsetattr(fd, termios.TCSANOW, old_settings)
+        finally:
+            os.close(fd)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Dosya icin onay istegi olusturur."
@@ -63,7 +169,20 @@ def main():
         "--response",
         help="Kontrol edilecek tek firmware yanit satiri",
     )
+    parser.add_argument(
+        "--port", help="Linux sanal UART yolu, ornek: /tmp/signer-uart"
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=15.0,
+        help="Host bekleme suresi, saniye (varsayilan: 15)",
+    )
     args = parser.parse_args()
+
+    import math
+    if not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error("--timeout sonlu ve pozitif olmali.")
+    if args.port is not None and args.response is not None:
+        parser.error("--port ve --response birlikte kullanilamaz.")
 
     if args.response is not None and args.request_id is None:
         parser.error("--response kullanirken --request-id de belirtilmeli.")
@@ -73,6 +192,11 @@ def main():
     try:
         digest = sha256_file(args.file)
         request = build_request(request_id, digest)
+
+        if args.port is not None:
+            args.response = exchange_uart(
+                args.port, request_id, digest, args.timeout
+            )
 
         if args.response is None:
             print(request)
