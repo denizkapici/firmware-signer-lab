@@ -51,3 +51,19 @@ Button Should Report Press And Release
     Send Command And Expect    BUTTON    BUTTON PRESSED
     Execute Command    sysbus.gpioPortA.approveButton Release
     Send Command And Expect    BUTTON    BUTTON RELEASED
+
+63 Characters Should Be Accepted As A Complete Command
+    ${command}=    Evaluate    "A" * 63
+    Send Command And Expect    ${command}    ERR UNKNOWN_COMMAND
+    Send Command And Expect    PING    PONG
+
+64 Characters Should Be Rejected And Parser Should Recover
+    ${command}=    Evaluate    "A" * 64
+    Send Command And Expect    ${command}    ERR COMMAND_TOO_LONG
+    Send Command And Expect    PING    PONG
+
+Invalid Character Should Be Rejected And Parser Should Recover
+    Execute Command    sysbus.uart4 WriteChar 0x00
+    Execute Command    sysbus.uart4 WriteChar 0x0D
+    Wait For Line On Uart    ^ERR INVALID_CHARACTER$    treatAsRegex=true
+    Send Command And Expect    PING    PONG
