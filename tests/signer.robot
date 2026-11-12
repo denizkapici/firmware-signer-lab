@@ -90,7 +90,7 @@ Request Should Be Approved By A Fresh Button Press
     LED State Should Be    True
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
@@ -102,7 +102,7 @@ Held Button Should Require Release And Another Press
     Execute Command    sysbus.gpioPortA.approveButton Release
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
 
 Pending Request Should Reject Another Request And Allow Cancellation
@@ -149,7 +149,7 @@ Second Request Must Not Replace Pending Digest
     Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    ERR BUSY
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
@@ -159,12 +159,12 @@ New Request After Cancellation Should Use New Digest
     Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    PENDING ${OTHER_ID} ${DIGEST_B}
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${OTHER_ID} ${DIGEST_B}$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${OTHER_ID} ${DIGEST_B} [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
 
 
 Host Generated File Request Should Be Approved
-    ${result}=    Run Process    python3    ${CURDIR}/../scripts/signer-client.py    ${CURDIR}/../firmware/build/signer.bin    --request-id    A0000001
+    ${result}=    Run Process    %{SIGNER_HOST_PYTHON=python3}    ${CURDIR}/../scripts/signer-client.py    ${CURDIR}/../firmware/build/signer.bin    --request-id    A0000001
     Should Be Equal As Integers    ${result.rc}    0
     ${command}=    Strip String    ${result.stdout}
     ${parts}=    Split String    ${command}
@@ -177,6 +177,6 @@ Host Generated File Request Should Be Approved
     LED State Should Be    True
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED A0000001 ${parts}[2]$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED A0000001 ${parts}[2] [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY

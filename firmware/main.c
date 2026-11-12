@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include "signer_crypto.h"
 
 #define REG32(address) (*(volatile uint32_t *)(address))
 
@@ -185,6 +186,24 @@ static void approval_response(const char *result)
     uart_write(approval_id);
     uart_write(" ");
     uart_write(approval_digest);
+
+    if (text_equal(result, "APPROVED")) {
+        static const char hex[] = "0123456789abcdef";
+        uint8_t signature[64];
+        char encoded[129];
+
+        signer_sign_approval(signature, approval_id, approval_digest);
+
+        for (uint32_t i = 0u; i < 64u; ++i) {
+            encoded[2u * i] = hex[signature[i] >> 4];
+            encoded[2u * i + 1u] = hex[signature[i] & 15u];
+        }
+        encoded[128] = '\0';
+
+        uart_write(" ");
+        uart_write(encoded);
+    }
+
     uart_write("\r\n");
 }
 

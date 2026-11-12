@@ -7,7 +7,7 @@ import threading
 import time
 import unittest
 
-from test_signer_client import client
+from test_signer_client import client, signed_response
 
 
 class TransportTests(unittest.TestCase):
@@ -71,7 +71,7 @@ class TransportTests(unittest.TestCase):
 
     def test_fragmented_approval_response(self):
         pending = f"PENDING {self.request_id} {self.digest}\r\n"
-        approved = f"APPROVED {self.request_id} {self.digest}\r\n"
+        approved = signed_response(self.request_id, self.digest) + "\r\n"
 
         result = self.exchange([
             pending[:9],
@@ -85,13 +85,13 @@ class TransportTests(unittest.TestCase):
 
     def test_wrong_digest_from_uart_is_rejected(self):
         pending = f"PENDING {self.request_id} {self.digest}\r\n"
-        wrong = f"APPROVED {self.request_id} {'b' * 64}\r\n"
+        wrong = signed_response(self.request_id, "b" * 64) + "\r\n"
 
         with self.assertRaisesRegex(ValueError, "ozet"):
             self.exchange([pending + wrong])
 
     def test_final_result_without_pending_is_rejected(self):
-        approved = f"APPROVED {self.request_id} {self.digest}\r\n"
+        approved = signed_response(self.request_id, self.digest) + "\r\n"
 
         with self.assertRaisesRegex(ValueError, "PENDING alinmadan"):
             self.exchange([approved])

@@ -29,6 +29,12 @@ jobs:
       - name: Test Ed25519 known-answer vector
         run: bash scripts/test-crypto.sh
 
+      - name: Install Python host dependencies
+        run: |
+          python3 -m pip install --only-binary=:all: -r requirements/host.txt
+          python3 -m pip check
+          printf 'SIGNER_HOST_PYTHON=%s\n' "$(command -v python3)" >> "$GITHUB_ENV"
+
       - name: Test Python host client
         run: |
           test -f tests/test_signer_client.py
