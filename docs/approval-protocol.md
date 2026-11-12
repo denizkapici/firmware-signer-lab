@@ -150,7 +150,7 @@ Run Renode tests with the installed Renode test runner:
 
     renode-test tests/*.robot
 
-The current suite contains 13 Python tests and 20 Renode tests.
+The current suite contains 13 Python tests and 21 Renode tests.
 
 Coverage includes command boundaries, invalid input, timer operation,
 fresh button approval, held-button rejection, short-pulse rejection,
@@ -186,3 +186,27 @@ These five tests exercise the Python transport without Renode.
 Two additional tests in tests/direct_uart.robot exercise the actual
 Python client against Renode and check approval and firmware timeout.
 They verify matching response fields and client exit codes.
+
+## Ed25519 foundation
+
+Monocypher 4.0.3 is vendored with its license and upstream commit.
+
+Run the native known-answer test:
+
+    ./scripts/test-crypto.sh
+
+Build the separate Cortex-M4 crypto test firmware:
+
+    ./scripts/build-crypto-test.sh
+
+Run its Renode test:
+
+    renode-test tests/crypto_arm.robot
+
+Both tests check RFC 8032 section 7.1 TEST 1: public key derivation,
+exact signature output, valid signature acceptance, changed-message
+rejection, and corrupted-signature rejection.
+
+The RFC key is public test material and is not a production key.
+The Cortex-M4 test uses a separate crypto-test.elf.
+The approval firmware does not yet generate signatures.
