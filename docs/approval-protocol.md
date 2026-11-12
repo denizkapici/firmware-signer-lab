@@ -15,7 +15,7 @@ establish which file the digest represents.
 This build uses the publicly known RFC 8032 section 7.1 TEST 1 seed.
 It is enabled explicitly with SIGNER_DEMO_KEY=1.
 
-The client pins this public key:
+When --allow-demo-key is explicitly selected, the client uses this public key:
 
 d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
 
@@ -129,7 +129,7 @@ Generate a request without sending:
 
 Send through a Linux PTY:
 
-    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart
+    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart --allow-demo-key
 
 --request-id supplies a specific ID; otherwise a random 8-character
 hexadecimal ID is generated.
@@ -170,7 +170,7 @@ Commands such as pause, start, and quit belong in the Renode Monitor.
     renode-test tests/*.robot
 
 Current coverage:
-- 21 Python tests for receipts, hashing, parsing, signature verification,
+- 34 Python tests for receipts, hashing, parsing, signature verification,
   rejection cases, and PTY transport with a simulated peer.
 - 18 firmware/protocol tests in tests/signer.robot.
 - 2 real Python-to-Renode PTY tests in tests/direct_uart.robot.
@@ -199,19 +199,19 @@ and runs the native, Python, and Renode checks.
 
 Save a receipt after receiving and verifying a signed approval:
 
-    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart --receipt-out test-results/approval.json
+    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart --receipt-out test-results/approval.json --allow-demo-key
 
 Create the output directory beforehand. An existing receipt is not
 overwritten. A timeout or an unsigned approval does not create a receipt.
 
 Verify the receipt against a file without connecting to Renode:
 
-    python3 scripts/signer-client.py firmware/build/signer.bin --verify-receipt test-results/approval.json
+    python3 scripts/signer-client.py firmware/build/signer.bin --verify-receipt test-results/approval.json --allow-demo-key
 
 The JSON receipt contains protocol, key_id, request_id, digest, and
 signature. Verification checks the expected protocol and demo key ID,
 recalculates the file's SHA-256 digest, and verifies the Ed25519 signature
-using the client's pinned public key.
+using the explicitly selected trusted public key.
 
 Offline verification does not establish freshness or prevent replay.
 The public demo key does not prove device identity or a real button press.
@@ -236,3 +236,38 @@ This receipt uses the public demo key and an automated simulated button press.
 It demonstrates the signing pipeline; it is not a human release approval.
 Artifacts can also be uploaded from failed jobs for debugging. Check the
 workflow result and verify the receipt before interpreting the files.
+
+## Explicit host trust selection
+
+Signature verification requires an explicit trust choice:
+
+- --allow-demo-key selects the publicly known RFC 8032 TEST 1 key.
+- --public-key-file selects a trusted public key supplied by the operator.
+- These options are mutually exclusive.
+- Request generation alone does not require a trust choice.
+
+The public-key file contains exactly 64 hexadecimal characters, optionally
+surrounded by whitespace. It represents a raw 32-byte Ed25519 public key;
+PEM is not supported. Supplying the known demo key through a file is rejected:
+use --allow-demo-key explicitly.
+
+Obtain the trusted public key through an independently trusted channel.
+Neither a UART response nor a receipt can supply its own trusted key.
+
+For non-demo keys, the receipt key_id is ED25519-SHA256- followed by the
+SHA-256 fingerprint of the raw public key. This identifies the selected key;
+it does not establish trust by itself.
+
+Example verification with an operator-selected public key:
+
+    python3 scripts/signer-client.py firmware/build/signer.bin --verify-receipt approval.json --public-key-file trusted-public-key.hex
+
+The same selected public key is used for UART signature verification,
+receipt creation, and offline receipt verification.
+
+Firmware still supports only the public demo seed. Its build guard requires
+SIGNER_DEMO_KEY=1; an undefined macro or a value of 0 is rejected.
+Selecting a different host public key does not change the firmware's key.
+
+This change adds explicit host trust configuration. It does not implement
+secure private-key storage, provisioning, rotation, or replay protection.

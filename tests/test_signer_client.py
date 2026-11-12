@@ -6,6 +6,8 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "signer-client.py"
 SPEC = importlib.util.spec_from_file_location("signer_client", SCRIPT)
 client = importlib.util.module_from_spec(SPEC)
+import sys
+sys.path.insert(0, str(SCRIPT.parent))
 SPEC.loader.exec_module(client)
 
 
@@ -59,7 +61,7 @@ class SignerClientTests(unittest.TestCase):
         result = client.validate_response(
             signed_response(self.request_id, self.digest) + "\r\n",
             self.request_id,
-            self.digest,
+            self.digest, trusted_key=client.DEMO_PUBLIC_KEY,
         )
         self.assertEqual(result, "APPROVED")
 
@@ -68,7 +70,7 @@ class SignerClientTests(unittest.TestCase):
             client.validate_response(
                 f"APPROVED B0000002 {self.digest}",
                 self.request_id,
-                self.digest,
+                self.digest, trusted_key=client.DEMO_PUBLIC_KEY,
             )
 
     def test_changed_digest_is_rejected(self):
@@ -76,7 +78,7 @@ class SignerClientTests(unittest.TestCase):
             client.validate_response(
                 f"APPROVED {self.request_id} {'b' * 64}",
                 self.request_id,
-                self.digest,
+                self.digest, trusted_key=client.DEMO_PUBLIC_KEY,
             )
 
     def test_nonapproval_states_remain_distinct(self):
@@ -85,7 +87,7 @@ class SignerClientTests(unittest.TestCase):
                 result = client.validate_response(
                     f"{status} {self.request_id} {self.digest}",
                     self.request_id,
-                    self.digest,
+                    self.digest, trusted_key=client.DEMO_PUBLIC_KEY,
                 )
                 self.assertEqual(result, status)
                 self.assertNotEqual(result, "APPROVED")
@@ -101,7 +103,7 @@ class SignerClientTests(unittest.TestCase):
             with self.subTest(line=line):
                 with self.assertRaises(ValueError):
                     client.validate_response(
-                        line, self.request_id, self.digest
+                        line, self.request_id, self.digest, trusted_key=client.DEMO_PUBLIC_KEY
                     )
 
 
@@ -111,7 +113,7 @@ class SignerClientTests(unittest.TestCase):
             client.validate_response(
                 f"APPROVED {self.request_id} {self.digest}",
                 self.request_id,
-                self.digest,
+                self.digest, trusted_key=client.DEMO_PUBLIC_KEY,
             )
 
     def test_corrupted_signature_is_rejected(self):
@@ -121,7 +123,7 @@ class SignerClientTests(unittest.TestCase):
         parts[3] = signature.hex()
         with self.assertRaisesRegex(ValueError, "imzasi gecersiz"):
             client.validate_response(
-                " ".join(parts), self.request_id, self.digest
+                " ".join(parts), self.request_id, self.digest, trusted_key=client.DEMO_PUBLIC_KEY
             )
 
     def test_signature_cannot_be_reused_for_another_request(self):
@@ -129,7 +131,7 @@ class SignerClientTests(unittest.TestCase):
         response = response.replace(self.request_id, "B0000002", 1)
         with self.assertRaisesRegex(ValueError, "imzasi gecersiz"):
             client.validate_response(
-                response, "B0000002", self.digest
+                response, "B0000002", self.digest, trusted_key=client.DEMO_PUBLIC_KEY
             )
 
 
