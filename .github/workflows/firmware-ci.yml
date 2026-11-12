@@ -38,6 +38,9 @@ jobs:
       - name: Build firmware
         run: ./scripts/build-firmware.sh
 
+      - name: Build Cortex-M4 crypto test
+        run: bash scripts/build-crypto-test.sh
+
       - name: Run Renode tests
         uses: antmicro/renode-test-action@v5
         with:
