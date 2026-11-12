@@ -1,0 +1,9 @@
+mach create "SignerLab"
+
+machine LoadPlatformDescription $ORIGIN/signer.repl
+sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+
+emulation CreateUartPtyTerminal "host_uart" "/tmp/signer-uart"
+connector Connect sysbus.uart4 host_uart
+
+start

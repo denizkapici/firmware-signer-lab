@@ -1,7 +1,7 @@
 mach create "SignerLab"
 
-machine LoadPlatformDescription @/home/ubuntu/devops-lab/projects/firmware-signer-lab/simulation/signer.repl
+machine LoadPlatformDescription $ORIGIN/signer.repl
 
 showAnalyzer sysbus.uart4
 
-sysbus LoadELF @/home/ubuntu/devops-lab/projects/firmware-signer-lab/firmware/build/signer.elf
+sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
