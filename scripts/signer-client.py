@@ -28,30 +28,63 @@ def build_request(request_id, digest):
     return f"REQUEST {request_id} {digest}"
 
 
+# RFC 8032 TEST 1 public key. Demonstration only.
+DEMO_PUBLIC_KEY_HEX = (
+    "d75a980182b10ab7d54bfed3c964073a"
+    "0ee172f3daa62325af021a68f707511a"
+)
+
+
+def approval_message(request_id, digest):
+    build_request(request_id, digest)
+    return f"SIGNER-LAB-V1 {request_id} {digest}".encode("ascii")
+
+
 def validate_response(line, request_id, digest):
-    # Validate the expected values as well.
     build_request(request_id, digest)
 
-    # Accept a single line with an optional CR, LF or CRLF ending.
     if line.endswith("\r\n"):
         line = line[:-2]
     elif line.endswith("\r") or line.endswith("\n"):
         line = line[:-1]
 
     parts = line.split(" ")
-    if len(parts) != 3:
-        raise ValueError("Yanit bicimi gecersiz.")
-
-    result, received_id, received_digest = parts
-    if result not in RESULTS:
+    if not parts or parts[0] not in RESULTS:
         raise ValueError("Beklenmeyen yanit turu.")
+
+    result = parts[0]
+    expected_fields = 4 if result == "APPROVED" else 3
+    if len(parts) != expected_fields:
+        raise ValueError("Yanit bicimi veya imza alani gecersiz.")
+
+    received_id, received_digest = parts[1:3]
     if received_id != request_id:
         raise ValueError("Yanit baska bir istege ait.")
     if received_digest != digest:
         raise ValueError("Yanittaki ozet beklenen dosya ozetiyle eslesmiyor.")
 
-    return result
+    if result == "APPROVED":
+        from cryptography.exceptions import InvalidSignature
+        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+            Ed25519PublicKey,
+        )
 
+        signature_hex = parts[3]
+        if re.fullmatch(r"[0-9a-fA-F]{128}", signature_hex) is None:
+            raise ValueError("Imza tam 128 hexadecimal karakter olmali.")
+
+        public_key = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(DEMO_PUBLIC_KEY_HEX)
+        )
+        try:
+            public_key.verify(
+                bytes.fromhex(signature_hex),
+                approval_message(request_id, digest),
+            )
+        except InvalidSignature as error:
+            raise ValueError("Ed25519 imzasi gecersiz.") from error
+
+    return result
 
 
 def exchange_uart(port, request_id, digest, timeout):
@@ -207,7 +240,7 @@ def main():
         parser.exit(1, f"Hata: {error}\n")
 
     if result == "APPROVED":
-        print("Eslesen APPROVED yaniti alindi; kriptografik imza dogrulanmadi.")
+        print("Eslesen APPROVED yaniti alindi; Ed25519 imzasi DEMO anahtariyla dogrulandi.")
         return 0
 
     print(f"Istek henuz onaylanmadi. Durum: {result}")

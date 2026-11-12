@@ -31,7 +31,7 @@ Start Direct Client
     [Arguments]    ${request_id}
     Set Test Variable    ${ACTIVE_ID}    ${request_id}
     ${process}=    Start Process
-    ...    python3
+    ...    %{SIGNER_HOST_PYTHON=python3}
     ...    ${CURDIR}/../scripts/signer-client.py
     ...    ${CURDIR}/../firmware/build/signer.bin
     ...    --request-id    ${request_id}
@@ -85,7 +85,7 @@ Direct Python Client Should Receive Approval
     Execute Command    sysbus.gpioPortA.approveButton Press
     Execute Command    emulation RunFor "0.100"
     ${result}=    Check Client Result    APPROVED    0
-    Should Contain    ${result.stdout}    Eslesen APPROVED yaniti alindi
+    Should Contain    ${result.stdout}    Ed25519 imzasi DEMO anahtariyla dogrulandi.
     Execute Command    sysbus.gpioPortA.approveButton Release
 
 Direct Python Client Should Receive Firmware Timeout

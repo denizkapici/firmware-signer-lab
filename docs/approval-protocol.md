@@ -1,212 +1,196 @@
-# Approval Protocol
+# Signed Approval Protocol — Demo V1
 
 ## Scope
 
-This project implements a simulated button-controlled approval workflow.
-The host calculates a file's SHA-256 digest. Firmware stores the supplied
-request ID and digest, waits for button approval, and returns a result.
+The host calculates a file's SHA-256 digest and sends an approval request.
+STM32 firmware stores the request ID and digest, waits for a fresh button
+press, and produces an Ed25519 signature after approval.
+The Python client checks the response fields and verifies the signature.
 
-The firmware does not receive the file, calculate its hash, or generate
-a cryptographic signature. An APPROVED response is a protocol message,
-not cryptographic proof of approval or device identity.
+Firmware receives the digest, not the file. It cannot independently
+establish which file the digest represents.
+
+## Demo key and trust
+
+This build uses the publicly known RFC 8032 section 7.1 TEST 1 seed.
+It is enabled explicitly with SIGNER_DEMO_KEY=1.
+
+The client pins this public key:
+
+d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+
+It does not accept a public key supplied over UART.
+
+These are real Ed25519 signatures made with a public test key.
+Anyone can reproduce them. They do not prove device identity or a real
+button press and must not authorize production operations.
 
 ## Transport and framing
 
-- Firmware UART: UART4, PC10 TX and PC11 RX.
-- Intended configuration: 115200 baud, 8 data bits, no parity, 1 stop bit.
+- UART4: PC10 TX, PC11 RX; intended configuration 115200 baud, 8N1.
 - Commands are case-sensitive printable ASCII.
-- Commands may end with CR, LF, or CRLF.
-- Responses end with CRLF.
+- Command endings: CR, LF, or CRLF.
+- Response endings: CRLF.
 - Empty command lines are ignored.
 - Maximum command length: 127 characters, excluding the line ending.
-- The command buffer is 128 bytes, including the null terminator.
-- Invalid or oversized lines are discarded until the next line ending.
-- The next command can then be processed normally.
+- Command buffer: 128 bytes including the null terminator.
+- Invalid and oversized lines are discarded through the next line ending.
 
-## Request format
+## Request
 
-REQUEST <request_id> <digest>
+    REQUEST <request_id> <digest>
 
 - request_id: exactly 8 hexadecimal characters.
 - digest: exactly 64 hexadecimal characters.
-- Uppercase and lowercase hexadecimal characters are accepted.
-- Fields must be separated by exactly one ASCII space.
-- Leading or trailing spaces are not accepted.
-- A complete REQUEST command is 81 characters long.
-- Firmware preserves the supplied hexadecimal letter case in responses.
+- Uppercase and lowercase hexadecimal letters are accepted.
+- Fields use exactly one ASCII space; no leading or trailing spaces.
+- Complete request length: 81 characters.
+- Firmware preserves the supplied letter case.
+- Only one request may be pending.
+- Another request returns ERR BUSY without replacing pending data.
 
-Example using the SHA-256 digest of the three bytes abc:
+## Signed message
 
-REQUEST A0000001 ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+Ed25519 signs the ASCII bytes of:
 
-Only one request may be pending. A second request is rejected with
-ERR BUSY and cannot replace the pending request ID or digest.
+    SIGNER-LAB-V1 <request_id> <digest>
 
-## Approval lifecycle
+The prefix and spaces are included.
+There is no trailing newline or null terminator in the signed message.
+The ID and digest use exactly the character case supplied in the request.
 
-1. A valid REQUEST stores its ID and digest, lights PD12, and returns:
-   PENDING <request_id> <digest>
-2. After the request begins, PA0 must be observed released for at least
-   20 ms before approval is armed.
-3. PA0 must then be observed pressed for at least 20 ms.
-4. A successful approval returns:
-   APPROVED <request_id> <digest>
-5. If the request reaches 5000 ms without approval, firmware returns:
-   TIMEOUT <request_id> <digest>
-6. CANCEL ends a pending request and returns:
-   CANCELLED <request_id> <digest>
+This uses ordinary Ed25519 over that message, not Ed25519ph.
+The file digest is represented as hexadecimal text within the message.
 
-Approval, cancellation, and timeout turn off the LED and clear the
-pending state and stored request fields.
+## Responses
 
-A button already held when a request starts cannot approve it.
-It must be released and pressed again.
+    PENDING <request_id> <digest>
+    APPROVED <request_id> <digest> <signature>
+    CANCELLED <request_id> <digest>
+    TIMEOUT <request_id> <digest>
 
-Button handling and timeout processing continue without incoming UART
-commands. SysTick provides the millisecond counter. Firmware checks
-timeout before checking button approval in each polling iteration.
+The signature is 64 bytes, encoded by firmware as 128 lowercase
+hexadecimal characters.
 
-## Commands and responses
+Only APPROVED carries a signature.
+PENDING, CANCELLED, TIMEOUT, and error responses are not authenticated.
+
+The client rejects unsigned APPROVED responses, invalid signatures,
+and responses with mismatched IDs or digests.
+Direct UART mode requires PENDING before a final result and rejects
+duplicate PENDING responses.
+
+## Button approval and timeout
+
+A valid request turns on the PD12 LED.
+After the request starts, PA0 must be observed released for at least
+20 ms, then pressed for at least 20 ms.
+
+A button already held at request time must be released and pressed again.
+Short pulses do not approve a request.
+
+The approval waiting limit is 5000 ms of firmware time.
+Timeout is checked before button approval in each polling iteration.
+Signing and response transmission take additional time after approval.
+
+Approval, cancellation, and timeout turn off the LED and clear pending
+state and stored request fields. Processing continues without UART input.
+
+## Other commands
 
 | Command | Response |
 | --- | --- |
 | PING | PONG |
-| STATUS, no pending request | READY |
-| STATUS, request pending | WAITING_APPROVAL |
+| STATUS, idle | READY |
+| STATUS, pending | WAITING_APPROVAL |
 | BUTTON | BUTTON PRESSED or BUTTON RELEASED |
-| LED ON, no pending request | OK LED ON |
-| LED OFF, no pending request | OK LED OFF |
-| LED ON or LED OFF, request pending | ERR BUSY |
-| Valid REQUEST, no pending request | PENDING followed by ID and digest |
-| REQUEST while a request is pending | ERR BUSY |
-| Malformed REQUEST, no pending request | ERR INVALID_REQUEST |
-| CANCEL, request pending | CANCELLED followed by ID and digest |
-| CANCEL, no pending request | ERR NO_PENDING_REQUEST |
+| LED ON, idle | OK LED ON |
+| LED OFF, idle | OK LED OFF |
+| LED ON or LED OFF, pending | ERR BUSY |
+| CANCEL, pending | CANCELLED followed by ID and digest |
+| CANCEL, idle | ERR NO_PENDING_REQUEST |
+| Malformed REQUEST, idle | ERR INVALID_REQUEST |
 | Unknown command | ERR UNKNOWN_COMMAND |
 
-Parser errors:
+Parser errors: ERR COMMAND_TOO_LONG and ERR INVALID_CHARACTER.
 
-- ERR COMMAND_TOO_LONG
-- ERR INVALID_CHARACTER
+CANCEL has no ID argument and cancels the current request.
+PING, STATUS, and BUTTON remain available while waiting for approval.
 
-CANCEL has no request ID argument and cancels the current pending request.
-PING, STATUS, and BUTTON remain available while approval is pending.
-Debug LED commands do not modify the LED while approval is pending.
+## Host setup and use
 
-## Python host client
+Install the Python dependency:
 
-Generate a request for a file:
+    python3 -m pip install -r requirements/host.txt
 
-    python3 scripts/signer-client.py firmware/build/signer.bin --request-id A0000001
+Generate a request without sending:
 
-If --request-id is omitted, the client generates an 8-character
-hexadecimal ID.
+    python3 scripts/signer-client.py firmware/build/signer.bin
 
-The client can also check a supplied response using --response.
-When --response is used, --request-id is required.
-
-Response validation requires an exact match of both the request ID and
-digest, including letter case.
-
-Exit codes:
-
-- 0: request generation succeeded, or a matching APPROVED was validated.
-- 1: file access or response validation failed.
-- 2: a matching PENDING, CANCELLED, or TIMEOUT was received.
-  Argument parsing errors also use exit code 2.
-
-The CLI supports direct Linux PTY communication through --port:
+Send through a Linux PTY:
 
     python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart
 
-The client sends a request, validates the matching PENDING response,
-and waits for a matching APPROVED, CANCELLED, or TIMEOUT response.
-It rejects mismatched IDs or digests and unexpected response sequences.
+--request-id supplies a specific ID; otherwise a random 8-character
+hexadecimal ID is generated.
 
---timeout sets the host's wall-clock waiting limit (default: 15 seconds).
-The firmware's 5000 ms timeout uses simulated time. These are separate
-limits. A host timeout means the firmware outcome is unknown; it does
-not cancel the pending firmware request.
+--response checks a supplied response and requires --request-id.
+It cannot be combined with --port.
 
-Direct PTY timeout and approval paths are covered by
-tests/direct_uart.robot. Robot Framework controls simulated time and
-the button, while the real Python client communicates over the PTY.
-The original tests/signer.robot suite also tests firmware behavior
-using Robot Framework UART keywords.
-For response checking, the CLI hashes the file again; it does not retain
-a request snapshot between separate invocations.
+--timeout sets the host wall-clock wait limit (default 15 seconds).
+It is separate from the firmware's simulated-time timeout.
+A host timeout means the firmware result is unknown and does not cancel
+the pending request.
+
+The CLI hashes the file again on each invocation.
+It does not retain a request snapshot between separate invocations.
+
+Exit codes:
+- 0: request generation succeeded or signed approval was verified.
+- 1: file, transport, response, or signature validation error.
+- 2: matching PENDING, CANCELLED, or TIMEOUT; also argument parsing errors.
+
+## Running Renode
+
+    ./scripts/run-renode.sh
+
+The launcher builds firmware and starts console-mode Renode with
+UART4 exposed at /tmp/signer-uart.
+RENODE_BIN can select the Renode executable.
+
+Use another Ubuntu terminal for the Python client.
+Commands such as pause, start, and quit belong in the Renode Monitor.
 
 ## Validation
 
-Run host tests:
-
     python3 -m unittest discover -s tests -p 'test_signer_*.py' -v
-
-Build firmware:
-
+    ./scripts/test-crypto.sh
     ./scripts/build-firmware.sh
-
-Run Renode tests with the installed Renode test runner:
-
+    ./scripts/build-crypto-test.sh
     renode-test tests/*.robot
 
-The current suite contains 13 Python tests and 21 Renode tests.
+Current coverage:
+- 16 Python tests for hashing, parsing, signature verification,
+  rejection cases, and PTY transport with a simulated peer.
+- 18 firmware/protocol tests in tests/signer.robot.
+- 2 real Python-to-Renode PTY tests in tests/direct_uart.robot.
+- 1 Cortex-M4 crypto test in tests/crypto_arm.robot.
+- 5 native C crypto checks run by scripts/test-crypto.sh.
 
-Coverage includes command boundaries, invalid input, timer operation,
-fresh button approval, held-button rejection, short-pulse rejection,
-cancellation, timeout, malformed requests, pending digest preservation,
-and a request generated from a real file by the Python client.
-
-GitHub Actions runs the host tests, firmware build, and Renode tests.
-
-## Current limitations
-
-- No cryptographic signing or signature verification.
-- No authenticated or encrypted UART protocol.
-- No replay protection or enforced request ID uniqueness.
-- Pending requests are stored in RAM and are lost on reset.
-- The button provides physical approval but there is no trusted display
-  showing the file or digest to the person pressing it.
-- A syntactically valid digest is accepted; firmware cannot establish
-  whether it corresponds to any particular file.
-- Unit tests validate the Python response checker separately.
-  Direct integration tests additionally exercise the actual Python
-  client against Renode through a Linux PTY.
-- Renode tests validate modeled firmware behavior. They do not prove
-  physical PCB operation, electrical integrity, or real button behavior.
-
-## Automated PTY transport tests
-
-Five Python tests use temporary Linux PTYs with a simulated peer.
-They cover fragmented approval responses, mismatched digests,
-final results without PENDING, duplicate PENDING responses,
-and host timeout when the peer is silent.
-
-These five tests exercise the Python transport without Renode.
-Two additional tests in tests/direct_uart.robot exercise the actual
-Python client against Renode and check approval and firmware timeout.
-They verify matching response fields and client exit codes.
-
-## Ed25519 foundation
+The direct approval test requires successful Python Ed25519 verification.
+The native and Cortex-M4 crypto tests check RFC 8032 TEST 1 and rejection
+of a changed message and corrupted signature.
 
 Monocypher 4.0.3 is vendored with its license and upstream commit.
+GitHub Actions installs host dependencies, builds both firmware images,
+and runs the native, Python, and Renode checks.
 
-Run the native known-answer test:
+## Remaining limitations
 
-    ./scripts/test-crypto.sh
-
-Build the separate Cortex-M4 crypto test firmware:
-
-    ./scripts/build-crypto-test.sh
-
-Run its Renode test:
-
-    renode-test tests/crypto_arm.robot
-
-Both tests check RFC 8032 section 7.1 TEST 1: public key derivation,
-exact signature output, valid signature acceptance, changed-message
-rejection, and corrupted-signature rejection.
-
-The RFC key is public test material and is not a production key.
-The Cortex-M4 test uses a separate crypto-test.elf.
-The approval firmware does not yet generate signatures.
+- Public demo private key; no production key provisioning or protection.
+- No authenticated or encrypted UART channel.
+- No replay protection or enforced request ID uniqueness.
+- Pending requests are lost on reset.
+- No trusted display showing the requested file or digest to the user.
+- Correct signatures do not establish which file was actually presented.
+- Tests in Renode do not prove physical PCB operation or electrical safety.
