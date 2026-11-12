@@ -6,6 +6,12 @@ Suite Teardown    Teardown
 Test Setup        Prepare Signer
 Test Teardown     Test Teardown
 
+*** Variables ***
+${REQUEST_ID}    A0000001
+${OTHER_ID}      B0000002
+${DIGEST_A}      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+${DIGEST_B}      bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+
 *** Keywords ***
 Prepare Signer
     Reset Emulation
@@ -52,13 +58,13 @@ Button Should Report Press And Release
     Execute Command    sysbus.gpioPortA.approveButton Release
     Send Command And Expect    BUTTON    BUTTON RELEASED
 
-63 Characters Should Be Accepted As A Complete Command
-    ${command}=    Evaluate    "A" * 63
+127 Characters Should Be Accepted As A Complete Command
+    ${command}=    Evaluate    "A" * 127
     Send Command And Expect    ${command}    ERR UNKNOWN_COMMAND
     Send Command And Expect    PING    PONG
 
-64 Characters Should Be Rejected And Parser Should Recover
-    ${command}=    Evaluate    "A" * 64
+128 Characters Should Be Rejected And Parser Should Recover
+    ${command}=    Evaluate    "A" * 128
     Send Command And Expect    ${command}    ERR COMMAND_TOO_LONG
     Send Command And Expect    PING    PONG
 
@@ -79,47 +85,78 @@ SysTick Should Count Milliseconds Without UART Input
     Should Be True    95 <= ${elapsed} <= 105
 
 Request Should Be Approved By A Fresh Button Press
-    Send Command And Expect    REQUEST    PENDING
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
     LED State Should Be    True
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
 Held Button Should Require Release And Another Press
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Send Command And Expect    REQUEST    PENDING
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
     Execute Command    emulation RunFor "0.050"
     Send Command And Expect    STATUS    WAITING_APPROVAL
     Execute Command    sysbus.gpioPortA.approveButton Release
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED$    treatAsRegex=true
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
     LED State Should Be    False
 
 Pending Request Should Reject Another Request And Allow Cancellation
-    Send Command And Expect    REQUEST    PENDING
-    Send Command And Expect    REQUEST    ERR BUSY
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    ERR BUSY
     Send Command And Expect    LED OFF    ERR BUSY
     LED State Should Be    True
-    Send Command And Expect    CANCEL    CANCELLED
+    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
     Send Command And Expect    CANCEL    ERR NO_PENDING_REQUEST
 
 Request Should Timeout Without UART Input
-    Send Command And Expect    REQUEST    PENDING
-    Wait For Line On Uart    ^TIMEOUT$    timeout=6    treatAsRegex=true
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Wait For Line On Uart    ^TIMEOUT ${REQUEST_ID} ${DIGEST_A}$    timeout=6    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
 Short Button Pulse Should Not Approve
-    Send Command And Expect    REQUEST    PENDING
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
     Execute Command    emulation RunFor "0.005"
     Execute Command    sysbus.gpioPortA.approveButton Release
     Execute Command    emulation RunFor "0.030"
     Send Command And Expect    STATUS    WAITING_APPROVAL
-    Send Command And Expect    CANCEL    CANCELLED
+    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
+
+
+Malformed Requests Should Be Rejected
+    Send Command And Expect    REQUEST    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST ABC ${DIGEST_A}    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST Z0000001 ${DIGEST_A}    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST ${REQUEST_ID} abc    ERR INVALID_REQUEST
+    ${bad_digest}=    Evaluate    "g" * 64
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${bad_digest}    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}0    ERR INVALID_REQUEST
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+    Send Command And Expect    PING    PONG
+
+Second Request Must Not Replace Pending Digest
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    ERR BUSY
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A}$    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+
+New Request After Cancellation Should Use New Digest
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    PENDING ${OTHER_ID} ${DIGEST_B}
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED ${OTHER_ID} ${DIGEST_B}$    treatAsRegex=true
+    LED State Should Be    False
