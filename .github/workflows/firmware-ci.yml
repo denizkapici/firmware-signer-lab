@@ -24,22 +24,24 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-arm-none-eabi binutils-arm-none-eabi
+            gcc-arm-none-eabi binutils-arm-none-eabi python3-venv
 
       - name: Test Ed25519 known-answer vector
         run: bash scripts/test-crypto.sh
 
       - name: Install Python host dependencies
         run: |
-          python3 -m pip install --only-binary=:all: -r requirements/host.txt
-          python3 -m pip check
-          printf 'SIGNER_HOST_PYTHON=%s\n' "$(command -v python3)" >> "$GITHUB_ENV"
+          python3 -m venv "$RUNNER_TEMP/signer-host-venv"
+          HOST_PYTHON="$RUNNER_TEMP/signer-host-venv/bin/python"
+          "$HOST_PYTHON" -m pip install --only-binary=:all: -r requirements/host.txt
+          "$HOST_PYTHON" -m pip check
+          printf 'SIGNER_HOST_PYTHON=%s\n' "$HOST_PYTHON" >> "$GITHUB_ENV"
 
       - name: Test Python host client
         run: |
           test -f tests/test_signer_client.py
           test -f tests/test_signer_transport.py
-          python3 -m unittest discover -s tests -p 'test_signer_*.py' -v
+          "$SIGNER_HOST_PYTHON" -m unittest discover -s tests -p 'test_signer_*.py' -v
 
       - name: Build firmware
         run: ./scripts/build-firmware.sh
