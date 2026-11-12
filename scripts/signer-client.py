@@ -6,6 +6,7 @@ import hashlib
 import re
 import secrets
 from pathlib import Path
+from signer_key_policy import DEMO_PUBLIC_KEY, load_trusted_key, key_id
 
 ID_PATTERN = re.compile(r"[0-9a-fA-F]{8}")
 DIGEST_PATTERN = re.compile(r"[0-9a-fA-F]{64}")
@@ -40,7 +41,7 @@ def approval_message(request_id, digest):
     return f"SIGNER-LAB-V1 {request_id} {digest}".encode("ascii")
 
 
-def validate_response(line, request_id, digest):
+def validate_response(line, request_id, digest, *, trusted_key):
     build_request(request_id, digest)
 
     if line.endswith("\r\n"):
@@ -74,7 +75,7 @@ def validate_response(line, request_id, digest):
             raise ValueError("Imza tam 128 hexadecimal karakter olmali.")
 
         public_key = Ed25519PublicKey.from_public_bytes(
-            bytes.fromhex(DEMO_PUBLIC_KEY_HEX)
+            trusted_key
         )
         try:
             public_key.verify(
@@ -87,7 +88,7 @@ def validate_response(line, request_id, digest):
     return result
 
 
-def exchange_uart(port, request_id, digest, timeout):
+def exchange_uart(port, request_id, digest, timeout, *, trusted_key):
     # Linux PTY transport. No additional Python package is required.
     import os
     import select
@@ -170,7 +171,7 @@ def exchange_uart(port, request_id, digest, timeout):
                 if line.startswith("ERR "):
                     raise ValueError("Firmware: " + line.rstrip("\r\n"))
 
-                result = validate_response(line, request_id, digest)
+                result = validate_response(line, request_id, digest, trusted_key=trusted_key)
 
                 if result == "PENDING":
                     if pending_seen:
@@ -204,17 +205,17 @@ RECEIPT_PROTOCOL = "SIGNER-LAB-V1"
 RECEIPT_KEY_ID = "RFC8032-TEST1-DEMO"
 
 
-def save_receipt(path, request_id, digest, response):
+def save_receipt(path, request_id, digest, response, *, trusted_key):
     import json
 
-    result = validate_response(response, request_id, digest)
+    result = validate_response(response, request_id, digest, trusted_key=trusted_key)
     if result != "APPROVED":
         raise ValueError("Yalnizca imzasi dogrulanmis onay kaydedilebilir.")
 
     signature = response.rstrip("\r\n").split(" ")[3]
     receipt = {
         "protocol": RECEIPT_PROTOCOL,
-        "key_id": RECEIPT_KEY_ID,
+        "key_id": key_id(trusted_key),
         "request_id": request_id,
         "digest": digest,
         "signature": signature,
@@ -226,7 +227,7 @@ def save_receipt(path, request_id, digest, response):
         stream.write("\n")
 
 
-def verify_receipt(file_path, receipt_path):
+def verify_receipt(file_path, receipt_path, *, trusted_key):
     import json
 
     def unique_fields(pairs):
@@ -249,7 +250,7 @@ def verify_receipt(file_path, receipt_path):
 
     if receipt["protocol"] != RECEIPT_PROTOCOL:
         raise ValueError("Desteklenmeyen protokol.")
-    if receipt["key_id"] != RECEIPT_KEY_ID:
+    if receipt["key_id"] != key_id(trusted_key):
         raise ValueError("Guvenilmeyen anahtar kimligi.")
 
     build_request(receipt["request_id"], receipt["digest"])
@@ -262,7 +263,7 @@ def verify_receipt(file_path, receipt_path):
         f'APPROVED {receipt["request_id"]} '
         f'{receipt["digest"]} {receipt["signature"]}'
     )
-    validate_response(response, receipt["request_id"], actual_digest)
+    validate_response(response, receipt["request_id"], actual_digest, trusted_key=trusted_key)
     return receipt
 
 
@@ -291,7 +292,36 @@ def main():
         "--verify-receipt", type=Path,
         help="Dosyaya ait onay belgesini cevrimdisi dogrula",
     )
+    trust = parser.add_mutually_exclusive_group()
+    trust.add_argument(
+        "--allow-demo-key", action="store_true",
+        help="Herkese acik demo anahtarini acikca kullan",
+    )
+    trust.add_argument(
+        "--public-key-file", type=Path,
+        help="Guvenilen acik anahtar: 64 hexadecimal karakter",
+    )
     args = parser.parse_args()
+
+    trusted_key = None
+    needs_trust = (
+        args.verify_receipt is not None
+        or args.port is not None
+        or args.response is not None
+    )
+    if needs_trust or args.allow_demo_key or args.public_key_file is not None:
+        try:
+            trusted_key = load_trusted_key(
+                args.public_key_file, args.allow_demo_key
+            )
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"Hata: {error}\n")
+
+    key_label = (
+        "DEMO ANAHTARI"
+        if trusted_key == DEMO_PUBLIC_KEY
+        else "SECILEN ACIK ANAHTAR"
+    )
 
     if args.verify_receipt is not None:
         if (args.port is not None or args.response is not None
@@ -299,10 +329,10 @@ def main():
                 or args.request_id is not None):
             parser.error("--verify-receipt diger islem secenekleriyle kullanilamaz.")
         try:
-            verify_receipt(args.file, args.verify_receipt)
+            verify_receipt(args.file, args.verify_receipt, trusted_key=trusted_key)
         except (OSError, ValueError) as error:
             parser.exit(1, f"Hata: {error}\n")
-        print("Dosya ozeti ve Ed25519 imzasi dogrulandi: DEMO ANAHTARI.")
+        print(f"Dosya ozeti ve Ed25519 imzasi dogrulandi: {key_label}.")
         return 0
 
     if (args.receipt_out is not None
@@ -326,14 +356,15 @@ def main():
 
         if args.port is not None:
             args.response = exchange_uart(
-                args.port, request_id, digest, args.timeout
+                args.port, request_id, digest, args.timeout,
+                trusted_key=trusted_key,
             )
 
         if args.response is None:
             print(request)
             return 0
 
-        result = validate_response(args.response, request_id, digest)
+        result = validate_response(args.response, request_id, digest, trusted_key=trusted_key)
     except (OSError, ValueError) as error:
         parser.exit(1, f"Hata: {error}\n")
 
@@ -341,12 +372,16 @@ def main():
         if args.receipt_out is not None:
             try:
                 save_receipt(
-                    args.receipt_out, request_id, digest, args.response
+                    args.receipt_out, request_id, digest, args.response,
+                    trusted_key=trusted_key,
                 )
             except (OSError, ValueError) as error:
                 parser.exit(1, f"Belge kaydedilemedi: {error}\n")
             print(f"Onay belgesi kaydedildi: {args.receipt_out}")
-        print("Eslesen APPROVED yaniti alindi; Ed25519 imzasi DEMO anahtariyla dogrulandi.")
+        if trusted_key == DEMO_PUBLIC_KEY:
+            print("Eslesen APPROVED yaniti alindi; Ed25519 imzasi DEMO anahtariyla dogrulandi.")
+        else:
+            print("Eslesen APPROVED yaniti alindi; Ed25519 imzasi secilen acik anahtarla dogrulandi.")
         return 0
 
     print(f"Istek henuz onaylanmadi. Durum: {result}")

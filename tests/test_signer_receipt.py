@@ -20,12 +20,12 @@ class ReceiptTests(unittest.TestCase):
 
     def save(self):
         client.save_receipt(
-            self.receipt, self.request_id, self.digest, self.response
+            self.receipt, self.request_id, self.digest, self.response, trusted_key=client.DEMO_PUBLIC_KEY
         )
 
     def test_receipt_round_trip(self):
         self.save()
-        result = client.verify_receipt(self.file, self.receipt)
+        result = client.verify_receipt(self.file, self.receipt, trusted_key=client.DEMO_PUBLIC_KEY)
         self.assertEqual(result["request_id"], self.request_id)
         self.assertEqual(result["digest"], self.digest)
 
@@ -33,7 +33,7 @@ class ReceiptTests(unittest.TestCase):
         self.save()
         self.file.write_bytes(b"modified firmware")
         with self.assertRaisesRegex(ValueError, "ozeti"):
-            client.verify_receipt(self.file, self.receipt)
+            client.verify_receipt(self.file, self.receipt, trusted_key=client.DEMO_PUBLIC_KEY)
 
     def test_changed_receipt_fields_are_rejected(self):
         self.save()
@@ -51,13 +51,13 @@ class ReceiptTests(unittest.TestCase):
                 changed[field] = value
                 self.receipt.write_text(json.dumps(changed))
                 with self.assertRaises(ValueError):
-                    client.verify_receipt(self.file, self.receipt)
+                    client.verify_receipt(self.file, self.receipt, trusted_key=client.DEMO_PUBLIC_KEY)
 
     def test_unsigned_approval_cannot_be_saved(self):
         with self.assertRaises(ValueError):
             client.save_receipt(
                 self.receipt, self.request_id, self.digest,
-                f"APPROVED {self.request_id} {self.digest}",
+                f"APPROVED {self.request_id} {self.digest}", trusted_key=client.DEMO_PUBLIC_KEY,
             )
         self.assertFalse(self.receipt.exists())
 

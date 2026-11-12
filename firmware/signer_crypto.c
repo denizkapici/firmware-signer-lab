@@ -4,8 +4,8 @@
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
-#ifndef SIGNER_DEMO_KEY
-#error "Only the explicit demo-key build is currently supported."
+#if !defined(SIGNER_DEMO_KEY) || SIGNER_DEMO_KEY != 1
+#error "Demo signing requires SIGNER_DEMO_KEY=1."
 #endif
 
 /* RFC 8032 TEST 1: PUBLIC TEST KEY, NOT A PRODUCTION SECRET. */

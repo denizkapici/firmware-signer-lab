@@ -57,7 +57,7 @@ class TransportTests(unittest.TestCase):
         try:
             with contextlib.redirect_stdout(io.StringIO()):
                 return client.exchange_uart(
-                    port, self.request_id, self.digest, timeout
+                    port, self.request_id, self.digest, timeout, trusted_key=client.DEMO_PUBLIC_KEY
                 )
         finally:
             worker.join(timeout=4.0)

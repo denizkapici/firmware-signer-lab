@@ -60,7 +60,7 @@ jobs:
         run: |
           test -s firmware/build/approval-demo.json
           "$SIGNER_HOST_PYTHON" scripts/signer-client.py firmware/build/signer.bin \
-            --verify-receipt firmware/build/approval-demo.json
+            --verify-receipt firmware/build/approval-demo.json --allow-demo-key
 
       - name: Upload firmware and test reports
         if: always()

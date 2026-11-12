@@ -33,6 +33,7 @@ Start Direct Client
     ${process}=    Start Process
     ...    %{SIGNER_HOST_PYTHON=python3}
     ...    ${CURDIR}/../scripts/signer-client.py
+    ...    --allow-demo-key
     ...    ${CURDIR}/../firmware/build/signer.bin
     ...    --request-id    ${request_id}
     ...    --port    ${PTY_DIR}/uart
@@ -97,6 +98,7 @@ Direct Python Client Should Receive Approval
     ${verification}=    Run Process
     ...    %{SIGNER_HOST_PYTHON=python3}
     ...    ${CURDIR}/../scripts/signer-client.py
+    ...    --allow-demo-key
     ...    ${CURDIR}/../firmware/build/signer.bin
     ...    --verify-receipt    ${PTY_DIR}/approval.json
     ...    timeout=10 seconds
