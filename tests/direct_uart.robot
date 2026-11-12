@@ -171,3 +171,39 @@ V2 Direct Approval Should Be Accepted Only Once
     Should Be Equal As Integers    ${replay.rc}    1
     Should Contain    ${replay.stderr}    already consumed
     Should Not Contain    ${replay.stdout}    ACCEPTED2
+
+
+V2 Timeout Should Not Consume Approval
+    ${id}=    Evaluate    "b" * 32
+    Set Test Variable    ${V2_ID}    ${id}
+    ${process}=    Start Process
+    ...    %{SIGNER_HOST_PYTHON=python3}
+    ...    ${CURDIR}/../scripts/signer-v2.py
+    ...    ${CURDIR}/../firmware/build/signer.bin
+    ...    --database    ${PTY_DIR}/approvals.sqlite3
+    ...    --target    staging
+    ...    --request-id    ${id}
+    ...    --port    ${PTY_DIR}/uart
+    ...    --allow-demo-key
+    ...    --timeout    60
+    ...    --response-out    ${PTY_DIR}/approved-v2.txt
+    ...    stdout=${PTY_DIR}/client.stdout
+    ...    stderr=${PTY_DIR}/client.stderr
+    Wait Until Keyword Succeeds    10 seconds    50 milliseconds    V2 Client Has Sent Request
+    Advance Until Pending
+    Execute Command    emulation RunFor "5.100"
+    ${result}=    Wait For Process    ${process}    timeout=10 seconds    on_timeout=kill
+    Log    ${result.stdout}
+    Log    ${result.stderr}
+    Should Be Equal As Integers    ${result.rc}    2
+    Should Be Empty    ${result.stderr}
+    Should Contain    ${result.stdout}    NOT ACCEPTED: TIMEOUT2
+    Should Not Contain    ${result.stdout}    ACCEPTED2
+    File Should Not Exist    ${PTY_DIR}/approved-v2.txt
+
+    ${check}=    Run Process
+    ...    %{SIGNER_HOST_PYTHON=python3}
+    ...    ${CURDIR}/check_pending_approval.py
+    ...    ${PTY_DIR}/approvals.sqlite3
+    Should Be Equal As Integers    ${check.rc}    0
+    Should Be Empty    ${check.stderr}
