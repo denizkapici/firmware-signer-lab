@@ -66,14 +66,14 @@ static int v2_lower_hex(const char *text, size_t length)
     return text[length] == '\0';
 }
 
-int signer_sign_approval_v2(
-    uint8_t signature[64],
+int signer_validate_approval_v2(
     const char *request_id,
     const char *digest,
     const char *target,
     const char *expires_at)
 {
-    if (signature == NULL || request_id == NULL || digest == NULL ||
+
+    if (request_id == NULL || digest == NULL ||
         target == NULL || expires_at == NULL) {
         return 0;
     }
@@ -120,6 +120,30 @@ int signer_sign_approval_v2(
     }
     if (expiry > UINT64_C(9007199254740991)) {
         return 0;
+    }
+
+    return 1;
+}
+
+int signer_sign_approval_v2(
+    uint8_t signature[64],
+    const char *request_id,
+    const char *digest,
+    const char *target,
+    const char *expires_at)
+{
+    if (signature == NULL ||
+        !signer_validate_approval_v2(request_id, digest, target, expires_at)) {
+        return 0;
+    }
+
+    size_t target_length = 0u;
+    size_t expiry_length = 0u;
+    while (target[target_length] != '\0') {
+        ++target_length;
+    }
+    while (expires_at[expiry_length] != '\0') {
+        ++expiry_length;
     }
 
     static const char prefix[] = "SIGNER-LAB-V2 ";

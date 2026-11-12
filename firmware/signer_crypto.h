@@ -24,4 +24,12 @@ int signer_sign_approval_v2(
     const char *expires_at
 );
 
+
+int signer_validate_approval_v2(
+    const char *request_id,
+    const char *digest,
+    const char *target,
+    const char *expires_at
+);
+
 #endif

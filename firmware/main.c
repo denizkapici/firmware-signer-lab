@@ -129,7 +129,10 @@ static int approval_armed;
 static int approval_last_raw;
 static uint32_t approval_started;
 static uint32_t approval_raw_since;
-static char approval_id[9];
+static char approval_id[33];
+static int approval_version2;
+static char approval_target[33];
+static char approval_expiry[17];
 static char approval_digest[65];
 
 static int text_starts_with(const char *text, const char *prefix)
@@ -181,29 +184,51 @@ static int request_valid(const char *command)
 
 static void approval_response(const char *result)
 {
-    uart_write(result);
-    uart_write(" ");
-    uart_write(approval_id);
-    uart_write(" ");
-    uart_write(approval_digest);
+    char encoded[129];
+    int approved = text_equal(result, "APPROVED");
 
-    if (text_equal(result, "APPROVED")) {
+    if (approved) {
         static const char hex[] = "0123456789abcdef";
         uint8_t signature[64];
-        char encoded[129];
 
-        signer_sign_approval(signature, approval_id, approval_digest);
+        if (approval_version2) {
+            if (!signer_sign_approval_v2(
+                    signature, approval_id, approval_digest,
+                    approval_target, approval_expiry)) {
+                uart_write("ERR SIGNING_FAILED\r\n");
+                return;
+            }
+        } else {
+            signer_sign_approval(signature, approval_id, approval_digest);
+        }
 
         for (uint32_t i = 0u; i < 64u; ++i) {
             encoded[2u * i] = hex[signature[i] >> 4];
             encoded[2u * i + 1u] = hex[signature[i] & 15u];
         }
         encoded[128] = '\0';
+    }
 
+    uart_write(result);
+    if (approval_version2) {
+        uart_write("2");
+    }
+    uart_write(" ");
+    uart_write(approval_id);
+    uart_write(" ");
+    uart_write(approval_digest);
+
+    if (approval_version2) {
+        uart_write(" ");
+        uart_write(approval_target);
+        uart_write(" ");
+        uart_write(approval_expiry);
+    }
+
+    if (approved) {
         uart_write(" ");
         uart_write(encoded);
     }
-
     uart_write("\r\n");
 }
 
@@ -213,6 +238,13 @@ static void approval_finish(const char *response)
     approval_armed = 0;
     led_set(0);
     approval_response(response);
+    approval_version2 = 0;
+    for (uint32_t i = 0u; i < sizeof(approval_target); ++i) {
+        approval_target[i] = '\0';
+    }
+    for (uint32_t i = 0u; i < sizeof(approval_expiry); ++i) {
+        approval_expiry[i] = '\0';
+    }
 
     for (uint32_t i = 0u; i < sizeof(approval_id); ++i) {
         approval_id[i] = '\0';
@@ -225,6 +257,7 @@ static void approval_finish(const char *response)
 
 static void approval_start(const char *command)
 {
+    approval_version2 = 0;
     for (uint32_t i = 0u; i < 8u; ++i) {
         approval_id[i] = command[8u + i];
     }
@@ -242,6 +275,75 @@ static void approval_start(const char *command)
     approval_pending = 1;
     led_set(1);
     approval_response("PENDING");
+}
+
+
+static int read_v2_field(
+    const char **cursor, char *output, uint32_t capacity, int last)
+{
+    uint32_t length = 0u;
+    while (**cursor != '\0' && **cursor != ' ') {
+        if (length >= capacity - 1u) {
+            return 0;
+        }
+        output[length++] = *(*cursor)++;
+    }
+    output[length] = '\0';
+
+    if (length == 0u) {
+        return 0;
+    }
+    if (last) {
+        return **cursor == '\0';
+    }
+    if (**cursor != ' ') {
+        return 0;
+    }
+    ++(*cursor);
+    return 1;
+}
+
+static int approval_start_v2(const char *command)
+{
+    char request_id[33];
+    char digest[65];
+    char target[33];
+    char expiry[17];
+    const char *cursor = command + 9u;
+
+    if (!read_v2_field(&cursor, request_id, sizeof(request_id), 0) ||
+        !read_v2_field(&cursor, digest, sizeof(digest), 0) ||
+        !read_v2_field(&cursor, target, sizeof(target), 0) ||
+        !read_v2_field(&cursor, expiry, sizeof(expiry), 1) ||
+        !signer_validate_approval_v2(request_id, digest, target, expiry)) {
+        return 0;
+    }
+
+    for (uint32_t i = 0u; i <= 32u; ++i) {
+        approval_id[i] = request_id[i];
+    }
+    for (uint32_t i = 0u; i <= 64u; ++i) {
+        approval_digest[i] = digest[i];
+    }
+
+    uint32_t i = 0u;
+    do {
+        approval_target[i] = target[i];
+    } while (target[i++] != '\0');
+    i = 0u;
+    do {
+        approval_expiry[i] = expiry[i];
+    } while (expiry[i++] != '\0');
+
+    approval_version2 = 1;
+    approval_started = system_milliseconds;
+    approval_raw_since = approval_started;
+    approval_last_raw = button_pressed();
+    approval_armed = 0;
+    approval_pending = 1;
+    led_set(1);
+    approval_response("PENDING");
+    return 1;
 }
 
 static void approval_poll(void)
@@ -276,6 +378,17 @@ static void approval_poll(void)
 
 static void handle_command(const char *command)
 {
+    if (text_equal(command, "REQUEST2") ||
+        text_starts_with(command, "REQUEST2 ")) {
+        if (approval_pending) {
+            uart_write("ERR BUSY\r\n");
+        } else if (text_equal(command, "REQUEST2") ||
+                   !approval_start_v2(command)) {
+            uart_write("ERR INVALID_REQUEST\r\n");
+        }
+        return;
+    }
+
     if (text_equal(command, "REQUEST") ||
         text_starts_with(command, "REQUEST ")) {
         if (approval_pending) {
@@ -330,7 +443,7 @@ static void handle_command(const char *command)
 
 int main(void)
 {
-    char command[128];
+    char command[256];
     uint32_t length = 0;
     int too_long = 0;
     int invalid_character = 0;
@@ -380,7 +493,10 @@ int main(void)
         }
 
         /* Sonlandirici '\0' icin bir bayt ayir. */
-        if (length >= sizeof(command) - 1u) {
+        /* Only REQUEST2 may exceed the V1 limit of 127 characters. */
+        if (length >= sizeof(command) - 1u ||
+            (length >= 127u &&
+             !text_starts_with(command, "REQUEST2 "))) {
             too_long = 1;
             continue;
         }
