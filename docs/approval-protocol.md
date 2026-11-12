@@ -219,3 +219,20 @@ The public demo key does not prove device identity or a real button press.
 The direct UART integration tests check receipt creation after approval,
 offline verification after resetting the emulation, and absence of a
 receipt after firmware timeout.
+
+## CI demo receipt artifact
+
+The direct approval test removes any previous exported demo receipt,
+then copies the newly verified receipt to firmware/build/approval-demo.json.
+The temporary UART directory is still removed during test cleanup.
+
+GitHub Actions verifies the exported receipt against firmware/build/signer.bin
+before uploading it with the firmware and test reports.
+
+After downloading and extracting the artifact, use the matching signer.bin
+and approval-demo.json paths with the host client's --verify-receipt option.
+
+This receipt uses the public demo key and an automated simulated button press.
+It demonstrates the signing pipeline; it is not a human release approval.
+Artifacts can also be uploaded from failed jobs for debugging. Check the
+workflow result and verify the receipt before interpreting the files.

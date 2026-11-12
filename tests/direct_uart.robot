@@ -81,6 +81,7 @@ Cleanup Direct UART
 
 *** Test Cases ***
 Direct Python Client Should Receive Approval
+    Remove File    ${CURDIR}/../firmware/build/approval-demo.json
     Start Direct Client    D0000001
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
@@ -105,6 +106,8 @@ Direct Python Client Should Receive Approval
     Should Be Equal As Integers    ${verification.rc}    0
     Should Be Empty    ${verification.stderr}
     Should Contain    ${verification.stdout}    Dosya ozeti ve Ed25519 imzasi dogrulandi: DEMO ANAHTARI.
+    Copy File    ${PTY_DIR}/approval.json    ${CURDIR}/../firmware/build/approval-demo.json
+    File Should Exist    ${CURDIR}/../firmware/build/approval-demo.json
 
 Direct Python Client Should Receive Firmware Timeout
     Start Direct Client    D0000002
