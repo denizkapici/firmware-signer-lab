@@ -12,4 +12,16 @@ void signer_sign_approval(
     const char digest[65]
 );
 
+/* Returns 1 on success, 0 for invalid canonical V2 fields.
+ * Inputs must be null-terminated strings.
+ * On failure, the signature output must not be used.
+ */
+int signer_sign_approval_v2(
+    uint8_t signature[64],
+    const char *request_id,
+    const char *digest,
+    const char *target,
+    const char *expires_at
+);
+
 #endif
