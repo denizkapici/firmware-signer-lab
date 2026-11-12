@@ -128,24 +128,101 @@ static int approval_armed;
 static int approval_last_raw;
 static uint32_t approval_started;
 static uint32_t approval_raw_since;
+static char approval_id[9];
+static char approval_digest[65];
+
+static int text_starts_with(const char *text, const char *prefix)
+{
+    while (*prefix != '\0') {
+        if (*text++ != *prefix++) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int is_hex_character(char ch)
+{
+    return (ch >= '0' && ch <= '9') ||
+           (ch >= 'a' && ch <= 'f') ||
+           (ch >= 'A' && ch <= 'F');
+}
+
+static int request_valid(const char *command)
+{
+    uint32_t length = 0u;
+
+    while (command[length] != '\0') {
+        ++length;
+    }
+
+    /* REQUEST + bosluk + 8 hex kimlik + bosluk + 64 hex ozet. */
+    if (length != 81u ||
+        !text_starts_with(command, "REQUEST ") ||
+        command[16] != ' ') {
+        return 0;
+    }
+
+    for (uint32_t i = 8u; i < 16u; ++i) {
+        if (!is_hex_character(command[i])) {
+            return 0;
+        }
+    }
+
+    for (uint32_t i = 17u; i < 81u; ++i) {
+        if (!is_hex_character(command[i])) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static void approval_response(const char *result)
+{
+    uart_write(result);
+    uart_write(" ");
+    uart_write(approval_id);
+    uart_write(" ");
+    uart_write(approval_digest);
+    uart_write("\r\n");
+}
 
 static void approval_finish(const char *response)
 {
     approval_pending = 0;
     approval_armed = 0;
     led_set(0);
-    uart_write(response);
+    approval_response(response);
+
+    for (uint32_t i = 0u; i < sizeof(approval_id); ++i) {
+        approval_id[i] = '\0';
+    }
+
+    for (uint32_t i = 0u; i < sizeof(approval_digest); ++i) {
+        approval_digest[i] = '\0';
+    }
 }
 
-static void approval_start(void)
+static void approval_start(const char *command)
 {
+    for (uint32_t i = 0u; i < 8u; ++i) {
+        approval_id[i] = command[8u + i];
+    }
+    approval_id[8] = '\0';
+
+    for (uint32_t i = 0u; i < 64u; ++i) {
+        approval_digest[i] = command[17u + i];
+    }
+    approval_digest[64] = '\0';
+
     approval_started = system_milliseconds;
     approval_raw_since = approval_started;
     approval_last_raw = button_pressed();
     approval_armed = 0;
     approval_pending = 1;
     led_set(1);
-    uart_write("PENDING\r\n");
+    approval_response("PENDING");
 }
 
 static void approval_poll(void)
@@ -158,7 +235,7 @@ static void approval_poll(void)
     int raw = button_pressed();
 
     if ((uint32_t)(now - approval_started) >= 5000u) {
-        approval_finish("TIMEOUT\r\n");
+        approval_finish("TIMEOUT");
         return;
     }
 
@@ -174,24 +251,27 @@ static void approval_poll(void)
     if (!raw) {
         approval_armed = 1;
     } else if (approval_armed) {
-        approval_finish("APPROVED\r\n");
+        approval_finish("APPROVED");
     }
 }
 
 static void handle_command(const char *command)
 {
-    if (text_equal(command, "REQUEST")) {
+    if (text_equal(command, "REQUEST") ||
+        text_starts_with(command, "REQUEST ")) {
         if (approval_pending) {
             uart_write("ERR BUSY\r\n");
+        } else if (!request_valid(command)) {
+            uart_write("ERR INVALID_REQUEST\r\n");
         } else {
-            approval_start();
+            approval_start(command);
         }
         return;
     }
 
     if (text_equal(command, "CANCEL")) {
         if (approval_pending) {
-            approval_finish("CANCELLED\r\n");
+            approval_finish("CANCELLED");
         } else {
             uart_write("ERR NO_PENDING_REQUEST\r\n");
         }
@@ -231,7 +311,7 @@ static void handle_command(const char *command)
 
 int main(void)
 {
-    char command[64];
+    char command[128];
     uint32_t length = 0;
     int too_long = 0;
     int invalid_character = 0;
