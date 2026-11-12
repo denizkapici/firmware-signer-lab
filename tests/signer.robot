@@ -67,3 +67,13 @@ Invalid Character Should Be Rejected And Parser Should Recover
     Execute Command    sysbus.uart4 WriteChar 0x0D
     Wait For Line On Uart    ^ERR INVALID_CHARACTER$    treatAsRegex=true
     Send Command And Expect    PING    PONG
+
+SysTick Should Count Milliseconds Without UART Input
+    ${address}=    Execute Command    sysbus GetSymbolAddress "system_milliseconds"
+    ${address}=    Strip String    ${address}
+    ${before}=    Execute Command    sysbus ReadDoubleWord ${address}
+    Execute Command    emulation RunFor "0.100"
+    ${after}=    Execute Command    sysbus ReadDoubleWord ${address}
+    ${elapsed}=    Evaluate    (int($after.strip(), 0) - int($before.strip(), 0)) & 0xFFFFFFFF
+    Log    Millisecond counter advanced by ${elapsed}
+    Should Be True    95 <= ${elapsed} <= 105

@@ -13,3 +13,6 @@ gpioPortD:
 
 approveButton: Miscellaneous.Button @ gpioPortA
     -> gpioPortA@0
+
+nvic:
+    systickFrequency: 16000000

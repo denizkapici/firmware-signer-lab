@@ -13,6 +13,29 @@
 #define UART4_BRR    REG32(0x40004C08u)
 #define UART4_CR1    REG32(0x40004C0Cu)
 
+/* 16 MHz cekirdek saatinde 1 ms SysTick. */
+#define SYST_CSR REG32(0xE000E010u)
+#define SYST_RVR REG32(0xE000E014u)
+#define SYST_CVR REG32(0xE000E018u)
+
+volatile uint32_t system_milliseconds;
+
+void SysTick_Handler(void)
+{
+    ++system_milliseconds;
+}
+
+static void systick_init(void)
+{
+    SYST_CSR = 0u;
+    system_milliseconds = 0u;
+    SYST_RVR = 16000u - 1u;
+    SYST_CVR = 0u;
+
+    /* ENABLE, TICKINT ve CLKSOURCE. */
+    SYST_CSR = 7u;
+}
+
 static void uart_init(void)
 {
     /* GPIOC ve UART4 saatlerini etkinlestir. */
@@ -139,6 +162,7 @@ int main(void)
 
     gpio_init();
     uart_init();
+    systick_init();
     uart_write("Signer firmware started\r\n");
 
     for (;;) {

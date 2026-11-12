@@ -7,9 +7,10 @@
 vector_table:
     .word _estack
     .word Reset_Handler
-    .rept 14
+    .rept 13
     .word Default_Handler
     .endr
+    .word SysTick_Handler
 
 .section .text.Reset_Handler, "ax", %progbits
 .global Reset_Handler
