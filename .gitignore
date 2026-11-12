@@ -14,3 +14,7 @@ _autosave-*
 /log.html
 /report.html
 /test-results/
+
+# Python bytecode
+__pycache__/
+*.py[cod]

@@ -1,6 +1,7 @@
 *** Settings ***
 Resource          ${RENODEKEYWORDS}
 Library           String
+Library           Process
 Suite Setup       Setup
 Suite Teardown    Teardown
 Test Setup        Prepare Signer
@@ -160,3 +161,22 @@ New Request After Cancellation Should Use New Digest
     Execute Command    sysbus.gpioPortA.approveButton Press
     Wait For Line On Uart    ^APPROVED ${OTHER_ID} ${DIGEST_B}$    treatAsRegex=true
     LED State Should Be    False
+
+
+Host Generated File Request Should Be Approved
+    ${result}=    Run Process    python3    ${CURDIR}/../scripts/signer-client.py    ${CURDIR}/../firmware/build/signer.bin    --request-id    A0000001
+    Should Be Equal As Integers    ${result.rc}    0
+    ${command}=    Strip String    ${result.stdout}
+    ${parts}=    Split String    ${command}
+    Length Should Be    ${parts}    3
+    Should Be Equal    ${parts}[0]    REQUEST
+    Should Be Equal    ${parts}[1]    A0000001
+    Length Should Be    ${parts}[2]    64
+    Write Line To Uart    ${command}    waitForEcho=false
+    Wait For Line On Uart    ^PENDING A0000001 ${parts}[2]$    treatAsRegex=true
+    LED State Should Be    True
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED A0000001 ${parts}[2]$    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY

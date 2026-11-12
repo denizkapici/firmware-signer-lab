@@ -26,6 +26,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc-arm-none-eabi binutils-arm-none-eabi
 
+      - name: Test Python host client
+        run: |
+          test -f tests/test_signer_client.py
+          python3 -m unittest discover -s tests -p 'test_signer_client.py' -v
+
       - name: Build firmware
         run: ./scripts/build-firmware.sh
 
