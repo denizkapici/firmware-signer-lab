@@ -128,9 +128,11 @@ The firmware's 5000 ms timeout uses simulated time. These are separate
 limits. A host timeout means the firmware outcome is unknown; it does
 not cancel the pending firmware request.
 
-Direct PTY timeout and approval paths have been tested manually.
-The automated Renode integration test uses Robot Framework for UART
-transport; it does not exercise the Python PTY transport.
+Direct PTY timeout and approval paths are covered by
+tests/direct_uart.robot. Robot Framework controls simulated time and
+the button, while the real Python client communicates over the PTY.
+The original tests/signer.robot suite also tests firmware behavior
+using Robot Framework UART keywords.
 For response checking, the CLI hashes the file again; it does not retain
 a request snapshot between separate invocations.
 
@@ -146,9 +148,9 @@ Build firmware:
 
 Run Renode tests with the installed Renode test runner:
 
-    renode-test tests/signer.robot
+    renode-test tests/*.robot
 
-The current suite contains 13 Python tests and 18 Renode tests.
+The current suite contains 13 Python tests and 20 Renode tests.
 
 Coverage includes command boundaries, invalid input, timer operation,
 fresh button approval, held-button rejection, short-pulse rejection,
@@ -168,7 +170,8 @@ GitHub Actions runs the host tests, firmware build, and Renode tests.
 - A syntactically valid digest is accepted; firmware cannot establish
   whether it corresponds to any particular file.
 - Unit tests validate the Python response checker separately.
-  The integration test checks firmware responses through Robot Framework.
+  Direct integration tests additionally exercise the actual Python
+  client against Renode through a Linux PTY.
 - Renode tests validate modeled firmware behavior. They do not prove
   physical PCB operation, electrical integrity, or real button behavior.
 
@@ -179,6 +182,7 @@ They cover fragmented approval responses, mismatched digests,
 final results without PENDING, duplicate PENDING responses,
 and host timeout when the peer is silent.
 
-These tests exercise the Python transport without Renode.
-Direct Python-to-Renode PTY approval and firmware timeout have
-also been checked manually.
+These five tests exercise the Python transport without Renode.
+Two additional tests in tests/direct_uart.robot exercise the actual
+Python client against Renode and check approval and firmware timeout.
+They verify matching response fields and client exit codes.

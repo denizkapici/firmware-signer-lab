@@ -39,7 +39,7 @@ jobs:
         uses: antmicro/renode-test-action@v5
         with:
           renode-revision: v1.17.0
-          tests-to-run: tests/signer.robot
+          tests-to-run: 'tests/*.robot'
           artifacts-path: test-results
 
       - name: Upload firmware and test reports
