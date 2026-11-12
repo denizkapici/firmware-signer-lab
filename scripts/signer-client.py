@@ -89,6 +89,16 @@ def validate_response(line, request_id, digest, *, trusted_key):
 
 
 def exchange_uart(port, request_id, digest, timeout, *, trusted_key):
+    return exchange_command(
+        port, build_request(request_id, digest), timeout,
+        lambda line: validate_response(
+            line, request_id, digest, trusted_key=trusted_key
+        ),
+        max_line=256,
+    )
+
+
+def exchange_command(port, command, timeout, validate_line, *, max_line=512):
     # Linux PTY transport. No additional Python package is required.
     import os
     import select
@@ -96,7 +106,6 @@ def exchange_uart(port, request_id, digest, timeout, *, trusted_key):
     import time
     import tty
 
-    command = build_request(request_id, digest)
     fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     old_settings = None
 
@@ -155,7 +164,7 @@ def exchange_uart(port, request_id, digest, timeout, *, trusted_key):
 
             for byte in chunk:
                 buffer.append(byte)
-                if len(buffer) > 256:
+                if len(buffer) > max_line:
                     raise ValueError("UART yaniti izin verilenden uzun.")
 
                 if byte != 10:
@@ -171,7 +180,7 @@ def exchange_uart(port, request_id, digest, timeout, *, trusted_key):
                 if line.startswith("ERR "):
                     raise ValueError("Firmware: " + line.rstrip("\r\n"))
 
-                result = validate_response(line, request_id, digest, trusted_key=trusted_key)
+                result = validate_line(line)
 
                 if result == "PENDING":
                     if pending_seen:

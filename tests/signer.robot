@@ -180,3 +180,67 @@ Host Generated File Request Should Be Approved
     Wait For Line On Uart    ^APPROVED A0000001 ${parts}[2] [0-9a-f]{128}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
+
+
+V2 Approval Should Match Independent Signature
+    ${id}=    Evaluate    "a" * 32
+    ${target}=    Evaluate    "x" * 32
+    ${expiry}=    Set Variable    9007199254740991
+    ${fields}=    Set Variable    ${id} ${DIGEST_A} ${target} ${expiry}
+    ${expected}=    Run Process
+    ...    %{SIGNER_HOST_PYTHON=python3}
+    ...    ${CURDIR}/expected_v2_signature.py
+    ...    ${id}
+    ...    ${DIGEST_A}
+    ...    ${target}
+    ...    ${expiry}
+    Should Be Equal As Integers    ${expected.rc}    0
+    Should Be Empty    ${expected.stderr}
+    ${signature}=    Strip String    ${expected.stdout}
+    Length Should Be    ${signature}    128
+    Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
+    LED State Should Be    True
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED2 ${fields} ${signature}$    timeout=6    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+
+Malformed V2 Requests Should Be Rejected
+    ${id}=    Evaluate    "a" * 32
+    Send Command And Expect    REQUEST2    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ABC ${DIGEST_A} staging 1800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${id} abc staging 1800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} _staging 1800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 01800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 9007199254740992    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 1800000000 extra    ERR INVALID_REQUEST
+    LED State Should Be    False
+    Send Command And Expect    PING    PONG
+
+V2 Pending Request Should Reject Replacement And Allow Cancellation
+    ${id}=    Evaluate    "a" * 32
+    ${fields}=    Set Variable    ${id} ${DIGEST_A} staging 1800000000
+    Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_B}    ERR BUSY
+    Send Command And Expect    REQUEST2 ${id} ${DIGEST_B} production 1800000001    ERR BUSY
+    Send Command And Expect    CANCEL    CANCELLED2 ${fields}
+    LED State Should Be    False
+    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    REQUEST2 ${fields}    ERR BUSY
+    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
+
+V2 Request Should Timeout Without UART Input
+    ${id}=    Evaluate    "a" * 32
+    ${fields}=    Set Variable    ${id} ${DIGEST_A} staging 1800000000
+    Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
+    Wait For Line On Uart    ^TIMEOUT2 ${fields}$    timeout=6    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+
+V2 Length Limits Should Preserve Parser Recovery
+    ${command}=    Evaluate    "REQUEST2 " + "x" * 246
+    Send Command And Expect    ${command}    ERR INVALID_REQUEST
+    ${command}=    Evaluate    "REQUEST2 " + "x" * 247
+    Send Command And Expect    ${command}    ERR COMMAND_TOO_LONG
+    Send Command And Expect    PING    PONG
