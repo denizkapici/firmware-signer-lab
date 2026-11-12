@@ -112,15 +112,6 @@ static int button_pressed(void)
     return (GPIOA_IDR & 1u) != 0u;
 }
 
-static char uart_read_char(void)
-{
-    /* RXNE: okunmayi bekleyen bir karakter var mi? */
-    while ((UART4_SR & (1u << 5)) == 0u) {
-    }
-
-    return (char)(UART4_DR & 0xFFu);
-}
-
 static int text_equal(const char *left, const char *right)
 {
     while (*left != '\0' && *left == *right) {
@@ -132,8 +123,93 @@ static int text_equal(const char *left, const char *right)
 }
 
 
+static int approval_pending;
+static int approval_armed;
+static int approval_last_raw;
+static uint32_t approval_started;
+static uint32_t approval_raw_since;
+
+static void approval_finish(const char *response)
+{
+    approval_pending = 0;
+    approval_armed = 0;
+    led_set(0);
+    uart_write(response);
+}
+
+static void approval_start(void)
+{
+    approval_started = system_milliseconds;
+    approval_raw_since = approval_started;
+    approval_last_raw = button_pressed();
+    approval_armed = 0;
+    approval_pending = 1;
+    led_set(1);
+    uart_write("PENDING\r\n");
+}
+
+static void approval_poll(void)
+{
+    if (!approval_pending) {
+        return;
+    }
+
+    uint32_t now = system_milliseconds;
+    int raw = button_pressed();
+
+    if ((uint32_t)(now - approval_started) >= 5000u) {
+        approval_finish("TIMEOUT\r\n");
+        return;
+    }
+
+    if (raw != approval_last_raw) {
+        approval_last_raw = raw;
+        approval_raw_since = now;
+    }
+
+    if ((uint32_t)(now - approval_raw_since) < 20u) {
+        return;
+    }
+
+    if (!raw) {
+        approval_armed = 1;
+    } else if (approval_armed) {
+        approval_finish("APPROVED\r\n");
+    }
+}
+
 static void handle_command(const char *command)
 {
+    if (text_equal(command, "REQUEST")) {
+        if (approval_pending) {
+            uart_write("ERR BUSY\r\n");
+        } else {
+            approval_start();
+        }
+        return;
+    }
+
+    if (text_equal(command, "CANCEL")) {
+        if (approval_pending) {
+            approval_finish("CANCELLED\r\n");
+        } else {
+            uart_write("ERR NO_PENDING_REQUEST\r\n");
+        }
+        return;
+    }
+
+    if (approval_pending && text_equal(command, "STATUS")) {
+        uart_write("WAITING_APPROVAL\r\n");
+        return;
+    }
+
+    if (approval_pending &&
+        (text_equal(command, "LED ON") ||
+         text_equal(command, "LED OFF"))) {
+        uart_write("ERR BUSY\r\n");
+        return;
+    }
+
     if (text_equal(command, "PING")) {
         uart_write("PONG\r\n");
     } else if (text_equal(command, "STATUS")) {
@@ -166,7 +242,15 @@ int main(void)
     uart_write("Signer firmware started\r\n");
 
     for (;;) {
-        unsigned char ch = (unsigned char)uart_read_char();
+        approval_poll();
+
+        if ((UART4_SR & (1u << 5)) == 0u) {
+            /* SysTick her milisaniyede islemciyi uyandirir. */
+            __asm volatile ("wfi");
+            continue;
+        }
+
+        unsigned char ch = (unsigned char)(UART4_DR & 0xFFu);
 
         /* CR, LF ve CRLF satir sonlarini destekle. */
         if (ch == '\r' || ch == '\n') {

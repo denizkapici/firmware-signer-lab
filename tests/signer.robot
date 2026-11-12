@@ -77,3 +77,49 @@ SysTick Should Count Milliseconds Without UART Input
     ${elapsed}=    Evaluate    (int($after.strip(), 0) - int($before.strip(), 0)) & 0xFFFFFFFF
     Log    Millisecond counter advanced by ${elapsed}
     Should Be True    95 <= ${elapsed} <= 105
+
+Request Should Be Approved By A Fresh Button Press
+    Send Command And Expect    REQUEST    PENDING
+    LED State Should Be    True
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED$    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+
+Held Button Should Require Release And Another Press
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Send Command And Expect    REQUEST    PENDING
+    Execute Command    emulation RunFor "0.050"
+    Send Command And Expect    STATUS    WAITING_APPROVAL
+    Execute Command    sysbus.gpioPortA.approveButton Release
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Wait For Line On Uart    ^APPROVED$    treatAsRegex=true
+    LED State Should Be    False
+
+Pending Request Should Reject Another Request And Allow Cancellation
+    Send Command And Expect    REQUEST    PENDING
+    Send Command And Expect    REQUEST    ERR BUSY
+    Send Command And Expect    LED OFF    ERR BUSY
+    LED State Should Be    True
+    Send Command And Expect    CANCEL    CANCELLED
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+    Send Command And Expect    CANCEL    ERR NO_PENDING_REQUEST
+
+Request Should Timeout Without UART Input
+    Send Command And Expect    REQUEST    PENDING
+    Wait For Line On Uart    ^TIMEOUT$    timeout=6    treatAsRegex=true
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+
+Short Button Pulse Should Not Approve
+    Send Command And Expect    REQUEST    PENDING
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Execute Command    emulation RunFor "0.005"
+    Execute Command    sysbus.gpioPortA.approveButton Release
+    Execute Command    emulation RunFor "0.030"
+    Send Command And Expect    STATUS    WAITING_APPROVAL
+    Send Command And Expect    CANCEL    CANCELLED
