@@ -187,9 +187,83 @@ def exchange_uart(port, request_id, digest, timeout):
     finally:
         try:
             if old_settings is not None:
-                termios.tcsetattr(fd, termios.TCSANOW, old_settings)
+                try:
+                    termios.tcsetattr(fd, termios.TCSANOW, old_settings)
+                except termios.error as error:
+                    # A disconnected PTY cannot restore terminal settings.
+                    if error.args[0] not in (5, 6):
+                        raise ValueError(
+                            "UART terminal ayarlari geri yuklenemedi."
+                        ) from error
         finally:
             os.close(fd)
+
+
+
+RECEIPT_PROTOCOL = "SIGNER-LAB-V1"
+RECEIPT_KEY_ID = "RFC8032-TEST1-DEMO"
+
+
+def save_receipt(path, request_id, digest, response):
+    import json
+
+    result = validate_response(response, request_id, digest)
+    if result != "APPROVED":
+        raise ValueError("Yalnizca imzasi dogrulanmis onay kaydedilebilir.")
+
+    signature = response.rstrip("\r\n").split(" ")[3]
+    receipt = {
+        "protocol": RECEIPT_PROTOCOL,
+        "key_id": RECEIPT_KEY_ID,
+        "request_id": request_id,
+        "digest": digest,
+        "signature": signature,
+    }
+
+    # Exclusive creation: never overwrite an existing receipt.
+    with Path(path).open("x", encoding="utf-8") as stream:
+        json.dump(receipt, stream, indent=2)
+        stream.write("\n")
+
+
+def verify_receipt(file_path, receipt_path):
+    import json
+
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Belgede tekrarlanan alan var.")
+            result[key] = value
+        return result
+
+    with Path(receipt_path).open("r", encoding="utf-8") as stream:
+        receipt = json.load(stream, object_pairs_hook=unique_fields)
+
+    expected = {"protocol", "key_id", "request_id", "digest", "signature"}
+    if not isinstance(receipt, dict) or set(receipt) != expected:
+        raise ValueError("Belge alanlari gecersiz.")
+
+    if not all(isinstance(value, str) for value in receipt.values()):
+        raise ValueError("Belge alanlari metin olmali.")
+
+    if receipt["protocol"] != RECEIPT_PROTOCOL:
+        raise ValueError("Desteklenmeyen protokol.")
+    if receipt["key_id"] != RECEIPT_KEY_ID:
+        raise ValueError("Guvenilmeyen anahtar kimligi.")
+
+    build_request(receipt["request_id"], receipt["digest"])
+    actual_digest = sha256_file(file_path)
+
+    if actual_digest != receipt["digest"]:
+        raise ValueError("Dosyanin ozeti onay belgesiyle eslesmiyor.")
+
+    response = (
+        f'APPROVED {receipt["request_id"]} '
+        f'{receipt["digest"]} {receipt["signature"]}'
+    )
+    validate_response(response, receipt["request_id"], actual_digest)
+    return receipt
 
 
 def main():
@@ -209,7 +283,31 @@ def main():
         "--timeout", type=float, default=15.0,
         help="Host bekleme suresi, saniye (varsayilan: 15)",
     )
+    parser.add_argument(
+        "--receipt-out", type=Path,
+        help="Dogrulanmis onayin kaydedilecegi yeni JSON dosyasi",
+    )
+    parser.add_argument(
+        "--verify-receipt", type=Path,
+        help="Dosyaya ait onay belgesini cevrimdisi dogrula",
+    )
     args = parser.parse_args()
+
+    if args.verify_receipt is not None:
+        if (args.port is not None or args.response is not None
+                or args.receipt_out is not None
+                or args.request_id is not None):
+            parser.error("--verify-receipt diger islem secenekleriyle kullanilamaz.")
+        try:
+            verify_receipt(args.file, args.verify_receipt)
+        except (OSError, ValueError) as error:
+            parser.exit(1, f"Hata: {error}\n")
+        print("Dosya ozeti ve Ed25519 imzasi dogrulandi: DEMO ANAHTARI.")
+        return 0
+
+    if (args.receipt_out is not None
+            and args.port is None and args.response is None):
+        parser.error("--receipt-out icin --port veya --response gerekli.")
 
     import math
     if not math.isfinite(args.timeout) or args.timeout <= 0:
@@ -240,6 +338,14 @@ def main():
         parser.exit(1, f"Hata: {error}\n")
 
     if result == "APPROVED":
+        if args.receipt_out is not None:
+            try:
+                save_receipt(
+                    args.receipt_out, request_id, digest, args.response
+                )
+            except (OSError, ValueError) as error:
+                parser.exit(1, f"Belge kaydedilemedi: {error}\n")
+            print(f"Onay belgesi kaydedildi: {args.receipt_out}")
         print("Eslesen APPROVED yaniti alindi; Ed25519 imzasi DEMO anahtariyla dogrulandi.")
         return 0
 

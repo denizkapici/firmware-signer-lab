@@ -170,7 +170,7 @@ Commands such as pause, start, and quit belong in the Renode Monitor.
     renode-test tests/*.robot
 
 Current coverage:
-- 16 Python tests for hashing, parsing, signature verification,
+- 21 Python tests for receipts, hashing, parsing, signature verification,
   rejection cases, and PTY transport with a simulated peer.
 - 18 firmware/protocol tests in tests/signer.robot.
 - 2 real Python-to-Renode PTY tests in tests/direct_uart.robot.
@@ -194,3 +194,28 @@ and runs the native, Python, and Renode checks.
 - No trusted display showing the requested file or digest to the user.
 - Correct signatures do not establish which file was actually presented.
 - Tests in Renode do not prove physical PCB operation or electrical safety.
+
+## Approval receipts
+
+Save a receipt after receiving and verifying a signed approval:
+
+    python3 scripts/signer-client.py firmware/build/signer.bin --port /tmp/signer-uart --receipt-out test-results/approval.json
+
+Create the output directory beforehand. An existing receipt is not
+overwritten. A timeout or an unsigned approval does not create a receipt.
+
+Verify the receipt against a file without connecting to Renode:
+
+    python3 scripts/signer-client.py firmware/build/signer.bin --verify-receipt test-results/approval.json
+
+The JSON receipt contains protocol, key_id, request_id, digest, and
+signature. Verification checks the expected protocol and demo key ID,
+recalculates the file's SHA-256 digest, and verifies the Ed25519 signature
+using the client's pinned public key.
+
+Offline verification does not establish freshness or prevent replay.
+The public demo key does not prove device identity or a real button press.
+
+The direct UART integration tests check receipt creation after approval,
+offline verification after resetting the emulation, and absence of a
+receipt after firmware timeout.
