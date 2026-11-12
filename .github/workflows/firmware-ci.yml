@@ -26,6 +26,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc-arm-none-eabi binutils-arm-none-eabi
 
+      - name: Test Ed25519 known-answer vector
+        run: bash scripts/test-crypto.sh
+
       - name: Test Python host client
         run: |
           test -f tests/test_signer_client.py
