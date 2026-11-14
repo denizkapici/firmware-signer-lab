@@ -4,4 +4,9 @@ machine LoadPlatformDescription $ORIGIN/signer.repl
 
 showAnalyzer sysbus.uart4
 
-sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+# Reload the image on every machine reset (e.g. after a watchdog reset).
+macro reset
+"""
+    sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+"""
+runMacro $reset

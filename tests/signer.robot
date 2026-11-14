@@ -1,4 +1,5 @@
 *** Settings ***
+Documentation     Firmware behaviour on the simulated STM32F407 (UART4, PA0, PD12).
 Resource          ${RENODEKEYWORDS}
 Library           String
 Library           Process
@@ -8,17 +9,21 @@ Test Setup        Prepare Signer
 Test Teardown     Test Teardown
 
 *** Variables ***
-${REQUEST_ID}    A0000001
-${OTHER_ID}      B0000002
-${DIGEST_A}      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-${DIGEST_B}      bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+${ID_A}           aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+${ID_B}           bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+${DIGEST_A}       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+${DIGEST_B}       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+${FIELDS_A}       ${ID_A} ${DIGEST_A} staging 1800000000
+${FIELDS_B}       ${ID_B} ${DIGEST_B} production 1800000001
+${SIGNATURE}      [0-9a-f]{128}
 
 *** Keywords ***
 Prepare Signer
     Reset Emulation
     Execute Command    mach create "SignerLab"
     Execute Command    machine LoadPlatformDescription @${CURDIR}/../simulation/signer.repl
-    Execute Command    sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf
+    Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
+    Execute Command    runMacro $reset
     Create Terminal Tester    sysbus.uart4    timeout=3    defaultPauseEmulation=true
     Start Emulation
     Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
@@ -34,6 +39,10 @@ LED State Should Be
     ${state}=    Strip String    ${state}
     Should Be Equal As Strings    ${state}    ${expected}
 
+Press Button After Debounce
+    Execute Command    emulation RunFor "0.030"
+    Execute Command    sysbus.gpioPortA.approveButton Press
+
 *** Test Cases ***
 PING Should Return PONG
     Send Command And Expect    PING    PONG
@@ -44,6 +53,11 @@ STATUS Should Return READY
 Unknown Command Should Be Rejected
     Send Command And Expect    X    ERR UNKNOWN_COMMAND
     Send Command And Expect    PING    PONG
+
+Removed V1 Request Should Be Rejected
+    Send Command And Expect    REQUEST A0000001 ${DIGEST_A}    ERR UNKNOWN_COMMAND
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
 
 LED Should Turn On And Off
     LED State Should Be    False
@@ -59,13 +73,13 @@ Button Should Report Press And Release
     Execute Command    sysbus.gpioPortA.approveButton Release
     Send Command And Expect    BUTTON    BUTTON RELEASED
 
-127 Characters Should Be Accepted As A Complete Command
-    ${command}=    Evaluate    "A" * 127
+255 Characters Should Be Accepted As A Complete Command
+    ${command}=    Evaluate    "A" * 255
     Send Command And Expect    ${command}    ERR UNKNOWN_COMMAND
     Send Command And Expect    PING    PONG
 
-128 Characters Should Be Rejected And Parser Should Recover
-    ${command}=    Evaluate    "A" * 128
+256 Characters Should Be Rejected And Parser Should Recover
+    ${command}=    Evaluate    "A" * 256
     Send Command And Expect    ${command}    ERR COMMAND_TOO_LONG
     Send Command And Expect    PING    PONG
 
@@ -86,161 +100,118 @@ SysTick Should Count Milliseconds Without UART Input
     Should Be True    95 <= ${elapsed} <= 105
 
 Request Should Be Approved By A Fresh Button Press
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
     LED State Should Be    True
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
+    Press Button After Debounce
+    Wait For Line On Uart    ^APPROVED2 ${FIELDS_A} ${SIGNATURE}$    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
-Held Button Should Require Release And Another Press
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Execute Command    emulation RunFor "0.050"
-    Send Command And Expect    STATUS    WAITING_APPROVAL
-    Execute Command    sysbus.gpioPortA.approveButton Release
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
-    LED State Should Be    False
-
-Pending Request Should Reject Another Request And Allow Cancellation
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    ERR BUSY
-    Send Command And Expect    LED OFF    ERR BUSY
-    LED State Should Be    True
-    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-    Send Command And Expect    CANCEL    ERR NO_PENDING_REQUEST
-
-Request Should Timeout Without UART Input
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Wait For Line On Uart    ^TIMEOUT ${REQUEST_ID} ${DIGEST_A}$    timeout=6    treatAsRegex=true
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-
-Short Button Pulse Should Not Approve
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Execute Command    emulation RunFor "0.005"
-    Execute Command    sysbus.gpioPortA.approveButton Release
-    Execute Command    emulation RunFor "0.030"
-    Send Command And Expect    STATUS    WAITING_APPROVAL
-    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
-
-
-Malformed Requests Should Be Rejected
-    Send Command And Expect    REQUEST    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST ABC ${DIGEST_A}    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST Z0000001 ${DIGEST_A}    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST ${REQUEST_ID} abc    ERR INVALID_REQUEST
-    ${bad_digest}=    Evaluate    "g" * 64
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${bad_digest}    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}0    ERR INVALID_REQUEST
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-    Send Command And Expect    PING    PONG
-
-Second Request Must Not Replace Pending Digest
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    ERR BUSY
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${REQUEST_ID} ${DIGEST_A} [0-9a-f]{128}$    treatAsRegex=true
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-
-New Request After Cancellation Should Use New Digest
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
-    Send Command And Expect    REQUEST ${OTHER_ID} ${DIGEST_B}    PENDING ${OTHER_ID} ${DIGEST_B}
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED ${OTHER_ID} ${DIGEST_B} [0-9a-f]{128}$    treatAsRegex=true
-    LED State Should Be    False
-
-
-Host Generated File Request Should Be Approved
-    ${result}=    Run Process    %{SIGNER_HOST_PYTHON=python3}    ${CURDIR}/../scripts/signer-client.py    ${CURDIR}/../firmware/build/signer.bin    --request-id    A0000001
-    Should Be Equal As Integers    ${result.rc}    0
-    ${command}=    Strip String    ${result.stdout}
-    ${parts}=    Split String    ${command}
-    Length Should Be    ${parts}    3
-    Should Be Equal    ${parts}[0]    REQUEST
-    Should Be Equal    ${parts}[1]    A0000001
-    Length Should Be    ${parts}[2]    64
-    Write Line To Uart    ${command}    waitForEcho=false
-    Wait For Line On Uart    ^PENDING A0000001 ${parts}[2]$    treatAsRegex=true
-    LED State Should Be    True
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
-    Wait For Line On Uart    ^APPROVED A0000001 ${parts}[2] [0-9a-f]{128}$    treatAsRegex=true
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-
-
-V2 Approval Should Match Independent Signature
-    ${id}=    Evaluate    "a" * 32
+Approval Should Match Independent Signature
     ${target}=    Evaluate    "x" * 32
-    ${expiry}=    Set Variable    9007199254740991
-    ${fields}=    Set Variable    ${id} ${DIGEST_A} ${target} ${expiry}
+    ${fields}=    Set Variable    ${ID_A} ${DIGEST_A} ${target} 9007199254740991
     ${expected}=    Run Process
     ...    %{SIGNER_HOST_PYTHON=python3}
     ...    ${CURDIR}/expected_v2_signature.py
-    ...    ${id}
-    ...    ${DIGEST_A}
-    ...    ${target}
-    ...    ${expiry}
+    ...    ${ID_A}    ${DIGEST_A}    ${target}    9007199254740991
     Should Be Equal As Integers    ${expected.rc}    0
     Should Be Empty    ${expected.stderr}
     ${signature}=    Strip String    ${expected.stdout}
     Length Should Be    ${signature}    128
     Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
-    LED State Should Be    True
-    Execute Command    emulation RunFor "0.030"
-    Execute Command    sysbus.gpioPortA.approveButton Press
+    Press Button After Debounce
     Wait For Line On Uart    ^APPROVED2 ${fields} ${signature}$    timeout=6    treatAsRegex=true
+    LED State Should Be    False
+
+Held Button Should Require Release And Another Press
+    Execute Command    sysbus.gpioPortA.approveButton Press
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Execute Command    emulation RunFor "0.050"
+    Send Command And Expect    STATUS    WAITING_APPROVAL
+    Execute Command    sysbus.gpioPortA.approveButton Release
+    Press Button After Debounce
+    Wait For Line On Uart    ^APPROVED2 ${FIELDS_A} ${SIGNATURE}$    treatAsRegex=true
+    LED State Should Be    False
+
+Short Button Pulse Should Not Approve
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Press Button After Debounce
+    Execute Command    emulation RunFor "0.005"
+    Execute Command    sysbus.gpioPortA.approveButton Release
+    Execute Command    emulation RunFor "0.030"
+    Send Command And Expect    STATUS    WAITING_APPROVAL
+    Send Command And Expect    CANCEL    CANCELLED2 ${FIELDS_A}
+
+Pending Request Should Reject Replacement And Allow Cancellation
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Send Command And Expect    REQUEST2 ${FIELDS_B}    ERR BUSY
+    Send Command And Expect    LED OFF    ERR BUSY
+    LED State Should Be    True
+    Send Command And Expect    CANCEL    CANCELLED2 ${FIELDS_A}
+    LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+    Send Command And Expect    CANCEL    ERR NO_PENDING_REQUEST
+
+Second Request Must Not Replace Pending Fields
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Send Command And Expect    REQUEST2 ${FIELDS_B}    ERR BUSY
+    Press Button After Debounce
+    Wait For Line On Uart    ^APPROVED2 ${FIELDS_A} ${SIGNATURE}$    treatAsRegex=true
+
+New Request After Cancellation Should Use New Fields
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Send Command And Expect    CANCEL    CANCELLED2 ${FIELDS_A}
+    Send Command And Expect    REQUEST2 ${FIELDS_B}    PENDING2 ${FIELDS_B}
+    Press Button After Debounce
+    Wait For Line On Uart    ^APPROVED2 ${FIELDS_B} ${SIGNATURE}$    treatAsRegex=true
+
+Request Should Timeout Without UART Input
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Wait For Line On Uart    ^TIMEOUT2 ${FIELDS_A}$    timeout=6    treatAsRegex=true
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
-Malformed V2 Requests Should Be Rejected
-    ${id}=    Evaluate    "a" * 32
+Malformed Requests Should Be Rejected
     Send Command And Expect    REQUEST2    ERR INVALID_REQUEST
     Send Command And Expect    REQUEST2 ABC ${DIGEST_A} staging 1800000000    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST2 ${id} abc staging 1800000000    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} _staging 1800000000    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 01800000000    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 9007199254740992    ERR INVALID_REQUEST
-    Send Command And Expect    REQUEST2 ${id} ${DIGEST_A} staging 1800000000 extra    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${ID_A} abc staging 1800000000    ERR INVALID_REQUEST
+    ${upper}=    Evaluate    "A" * 64
+    Send Command And Expect    REQUEST2 ${ID_A} ${upper} staging 1800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${ID_A} ${DIGEST_A} _staging 1800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${ID_A} ${DIGEST_A} staging 01800000000    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${ID_A} ${DIGEST_A} staging 9007199254740992    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${FIELDS_A} extra    ERR INVALID_REQUEST
+    Send Command And Expect    REQUEST2 ${ID_A} ${DIGEST_A} staging    ERR INVALID_REQUEST
     LED State Should Be    False
     Send Command And Expect    PING    PONG
 
-V2 Pending Request Should Reject Replacement And Allow Cancellation
-    ${id}=    Evaluate    "a" * 32
-    ${fields}=    Set Variable    ${id} ${DIGEST_A} staging 1800000000
-    Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_B}    ERR BUSY
-    Send Command And Expect    REQUEST2 ${id} ${DIGEST_B} production 1800000001    ERR BUSY
-    Send Command And Expect    CANCEL    CANCELLED2 ${fields}
-    LED State Should Be    False
-    Send Command And Expect    REQUEST ${REQUEST_ID} ${DIGEST_A}    PENDING ${REQUEST_ID} ${DIGEST_A}
-    Send Command And Expect    REQUEST2 ${fields}    ERR BUSY
-    Send Command And Expect    CANCEL    CANCELLED ${REQUEST_ID} ${DIGEST_A}
-
-V2 Request Should Timeout Without UART Input
-    ${id}=    Evaluate    "a" * 32
-    ${fields}=    Set Variable    ${id} ${DIGEST_A} staging 1800000000
-    Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
-    Wait For Line On Uart    ^TIMEOUT2 ${fields}$    timeout=6    treatAsRegex=true
-    LED State Should Be    False
-    Send Command And Expect    STATUS    READY
-
-V2 Length Limits Should Preserve Parser Recovery
+Request Length Limits Should Preserve Parser Recovery
     ${command}=    Evaluate    "REQUEST2 " + "x" * 246
     Send Command And Expect    ${command}    ERR INVALID_REQUEST
     ${command}=    Evaluate    "REQUEST2 " + "x" * 247
     Send Command And Expect    ${command}    ERR COMMAND_TOO_LONG
+    Send Command And Expect    PING    PONG
+
+Command Sent During Signing Should Not Be Lost
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    PENDING2 ${FIELDS_A}
+    Press Button After Debounce
+    # The press is accepted after the 20 ms debounce; send PING just after
+    # that, so its bytes arrive while the signature is being computed.
+    Execute Command    emulation RunFor "0.022"
+    Write Line To Uart    PING    waitForEcho=false
+    Wait For Line On Uart    ^APPROVED2 ${FIELDS_A} ${SIGNATURE}$    treatAsRegex=true
+    Wait For Line On Uart    ^PONG$    treatAsRegex=true
+
+Watchdog Should Not Reset An Idle Device
+    Execute Command    emulation RunFor "6.0"
+    Send Command And Expect    PING    PONG
+
+Fault Should Be Reported And Recovered By Watchdog
+    # Place a permanently undefined Thumb instruction (UDF #0) in RAM and jump to it.
+    Execute Command    pause
+    Execute Command    sysbus WriteWord 0x2001F000 0xDE00
+    Execute Command    cpu PC 0x2001F000
+    Start Emulation
+    Wait For Line On Uart    ^FAULT pc=2001f000 .*$    treatAsRegex=true
+    Wait For Line On Uart    ^Signer firmware started$    timeout=6    treatAsRegex=true
     Send Command And Expect    PING    PONG

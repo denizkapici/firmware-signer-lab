@@ -5,7 +5,7 @@ PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_ROOT"
 
 command -v gcc >/dev/null 2>&1 || {
-    printf 'gcc bulunamadi.\n' >&2
+    printf 'gcc not found.\n' >&2
     exit 1
 }
 

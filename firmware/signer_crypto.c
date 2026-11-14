@@ -16,44 +16,6 @@ static const uint8_t demo_seed[32] = {
     0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
 };
 
-void signer_sign_approval(
-    uint8_t signature[64],
-    const char request_id[9],
-    const char digest[65])
-{
-    static const char prefix[] = "SIGNER-LAB-V1 ";
-    uint8_t message[(sizeof(prefix) - 1u) + 8u + 1u + 64u];
-    uint8_t seed[32];
-    uint8_t secret_key[64];
-    uint8_t public_key[32];
-    size_t position = 0u;
-
-    for (size_t i = 0u; i < sizeof(prefix) - 1u; ++i) {
-        message[position++] = (uint8_t)prefix[i];
-    }
-
-    for (size_t i = 0u; i < 8u; ++i) {
-        message[position++] = (uint8_t)request_id[i];
-    }
-
-    message[position++] = (uint8_t)' ';
-
-    for (size_t i = 0u; i < 64u; ++i) {
-        message[position++] = (uint8_t)digest[i];
-    }
-
-    for (size_t i = 0u; i < sizeof(seed); ++i) {
-        seed[i] = demo_seed[i];
-    }
-
-    crypto_ed25519_key_pair(secret_key, public_key, seed);
-    crypto_ed25519_sign(signature, secret_key, message, position);
-
-    crypto_wipe(secret_key, sizeof(secret_key));
-    crypto_wipe(seed, sizeof(seed));
-}
-
-
 static int v2_lower_hex(const char *text, size_t length)
 {
     for (size_t i = 0u; i < length; ++i) {
@@ -72,7 +34,6 @@ int signer_validate_approval_v2(
     const char *target,
     const char *expires_at)
 {
-
     if (request_id == NULL || digest == NULL ||
         target == NULL || expires_at == NULL) {
         return 0;

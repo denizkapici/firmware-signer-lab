@@ -1,7 +1,12 @@
 mach create "SignerLab"
 
 machine LoadPlatformDescription $ORIGIN/signer.repl
-sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+# Reload the image on every machine reset (e.g. after a watchdog reset).
+macro reset
+"""
+    sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+"""
+runMacro $reset
 
 emulation CreateUartPtyTerminal "host_uart" "/tmp/signer-uart"
 connector Connect sysbus.uart4 host_uart

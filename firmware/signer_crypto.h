@@ -3,29 +3,34 @@
 
 #include <stdint.h>
 
-/* Inputs: validated 8-character ID and 64-character digest.
- * Output: 64-byte Ed25519 signature.
- */
-void signer_sign_approval(
-    uint8_t signature[64],
-    const char request_id[9],
-    const char digest[65]
-);
+#define SIGNER_REQUEST_ID_LENGTH 32u
+#define SIGNER_DIGEST_LENGTH     64u
+#define SIGNER_TARGET_MAX_LENGTH 32u
+#define SIGNER_EXPIRY_MAX_LENGTH 16u
+#define SIGNER_SIGNATURE_LENGTH  64u
 
-/* Returns 1 on success, 0 for invalid canonical V2 fields.
- * Inputs must be null-terminated strings.
- * On failure, the signature output must not be used.
+/*
+ * Canonical V2 fields (all null-terminated):
+ *   request_id  32 lowercase hex characters (128-bit random ID)
+ *   digest      64 lowercase hex characters (SHA-256 of the file)
+ *   target      1..32 of [a-z0-9_-], must not start with '_' or '-'
+ *   expires_at  Unix time, decimal, no leading zero, <= 2^53 - 1
+ *
+ * The firmware has no wall clock, so it validates the expiry format only;
+ * the host enforces the actual validity period.
  */
-int signer_sign_approval_v2(
-    uint8_t signature[64],
+int signer_validate_approval_v2(
     const char *request_id,
     const char *digest,
     const char *target,
     const char *expires_at
 );
 
-
-int signer_validate_approval_v2(
+/* Signs "SIGNER-LAB-V2 <request_id> <digest> <target> <expires_at>" with
+ * Ed25519. Returns 1 on success, 0 for non-canonical fields (in which case
+ * the signature output must not be used). */
+int signer_sign_approval_v2(
+    uint8_t signature[SIGNER_SIGNATURE_LENGTH],
     const char *request_id,
     const char *digest,
     const char *target,

@@ -25,7 +25,7 @@ class CryptoV2Tests(unittest.TestCase):
             "gcc", "-shared", "-fPIC", "-std=c11", "-O2",
             "-Wall", "-Wextra", "-Werror",
             "-DSIGNER_DEMO_KEY=1",
-            "-Ifirmware/vendor/monocypher",
+            "-Ifirmware", "-Ifirmware/vendor/monocypher",
             "firmware/signer_crypto.c",
             "firmware/vendor/monocypher/monocypher.c",
             "firmware/vendor/monocypher/monocypher-ed25519.c",
