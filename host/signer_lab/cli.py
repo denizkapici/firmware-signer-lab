@@ -8,11 +8,11 @@ import sys
 import time
 from pathlib import Path
 
-from .keys import DEMO_PUBLIC_KEY, load_trusted_key
+from .keys import key_id, load_trusted_key, parse_public_key, save_public_key
 from .protocol import Operation, check_response, sha256_file
 from .receipt import load_receipt, save_receipt, verify_receipt
 from .store import ApprovalStore
-from .transport import exchange_command
+from .transport import TransportError, exchange_command, query
 
 EXIT_OK = 0
 EXIT_ERROR = 1
@@ -20,23 +20,14 @@ EXIT_NOT_APPROVED = 2
 
 
 def add_trust_options(parser):
-    trust = parser.add_mutually_exclusive_group(required=True)
-    trust.add_argument(
-        "--public-key-file", type=Path,
-        help="trusted Ed25519 public key (64 hex characters)",
-    )
-    trust.add_argument(
-        "--allow-demo-key", action="store_true",
-        help="trust the public RFC 8032 demo key (never for production)",
+    parser.add_argument(
+        "--public-key-file", type=Path, required=True,
+        help="enrolled device public key (from 'signer-lab enroll')",
     )
 
 
 def trusted_key(args):
-    return load_trusted_key(args.public_key_file, args.allow_demo_key)
-
-
-def key_label(key):
-    return "DEMO KEY" if key == DEMO_PUBLIC_KEY else "selected public key"
+    return load_trusted_key(args.public_key_file)
 
 
 def new_operation(file, target, request_id, ttl, now):
@@ -46,6 +37,24 @@ def new_operation(file, target, request_id, ttl, now):
         target,
         int(now) + ttl,
     )
+
+
+def command_enroll(args):
+    """Read the device public key once and store it as the trusted key."""
+    if args.key_out.exists():
+        raise FileExistsError(f"Key file already exists: {args.key_out}")
+
+    line = query(args.port, "PUBKEY", args.timeout).rstrip("\r\n")
+    parts = line.split(" ")
+    if len(parts) != 2 or parts[0] != "PUBKEY":
+        raise TransportError(f"Unexpected answer to PUBKEY: {line!r}")
+
+    public_key = parse_public_key(parts[1])
+    save_public_key(args.key_out, public_key)
+    print(f"ENROLLED {key_id(public_key)}")
+    print(f"Public key saved: {args.key_out}")
+    print("Check this key ID against the device before trusting it.")
+    return EXIT_OK
 
 
 def command_request(args):
@@ -92,7 +101,7 @@ def command_approve(args):
         print(f"Receipt saved: {args.receipt_out}")
 
     print(f"ACCEPTED2 {operation.request_id} {operation.digest} {operation.target}")
-    print(f"Ed25519 signature verified with the {key_label(key)}.")
+    print(f"Ed25519 signature verified with {key_id(key)}.")
     return EXIT_OK
 
 
@@ -124,7 +133,7 @@ def command_verify(args):
         f"VALID {operation.request_id} {operation.digest} {operation.target} "
         f"{operation.expires_at}"
     )
-    print(f"File digest and Ed25519 signature verified with the {key_label(key)}.")
+    print(f"File digest and Ed25519 signature verified with {key_id(key)}.")
     print("Note: this does not prove the approval is unused; use 'accept' for that.")
     return EXIT_OK
 
@@ -149,6 +158,12 @@ def build_parser():
         description="Host client for the button-approved firmware signer.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    enroll = commands.add_parser("enroll", help="store the device public key (first use)")
+    enroll.add_argument("--port", required=True, help="serial/PTY path, e.g. /tmp/signer-uart")
+    enroll.add_argument("--key-out", type=Path, required=True)
+    enroll.add_argument("--timeout", type=positive_finite, default=10.0)
+    enroll.set_defaults(handler=command_enroll)
 
     request = commands.add_parser("request", help="print a REQUEST2 line for a file")
     request.add_argument("file", type=Path)

@@ -100,12 +100,14 @@ jobs:
           tests-to-run: 'tests/*.robot'
           artifacts-path: test-results
 
-      - name: Verify exported demo approval receipt
+      - name: Verify the approval receipt with the enrolled device key
         run: |
-          test -s firmware/build/approval-demo.json
+          test -s firmware/build/approval-receipt.json
+          test -s firmware/build/device-public-key.hex
           ./scripts/signer-lab verify firmware/build/signer.bin \
-            --receipt firmware/build/approval-demo.json \
-            --target staging --allow-demo-key
+            --receipt firmware/build/approval-receipt.json \
+            --target staging \
+            --public-key-file firmware/build/device-public-key.hex
 
       - name: Upload firmware and test reports
         if: always()
@@ -116,7 +118,8 @@ jobs:
             firmware/build/signer.elf
             firmware/build/signer.bin
             firmware/build/signer.map
-            firmware/build/approval-demo.json
+            firmware/build/approval-receipt.json
+            firmware/build/device-public-key.hex
             test-results/
           if-no-files-found: warn
           retention-days: 7
