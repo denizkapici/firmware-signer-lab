@@ -31,14 +31,14 @@ def _write_all(fd, data, deadline):
         offset += count
 
 
-def exchange_command(port, command, timeout, classify, *, max_line=512, log=print):
-    """Send one command and return the final response line.
+def _is_device_notice(line):
+    """Lines a (re)starting device prints that answer no command."""
+    return line == STARTUP_LINE or line.startswith(("INFO ", "WARN "))
 
-    `classify(line)` must return "PENDING" for the intermediate pending
-    response and any other value for a final response; it raises
-    ValueError for lines that do not belong to this exchange. Exactly one
-    PENDING must precede the final response.
-    """
+
+def _session(port, command, timeout, handle_line, max_line, log):
+    """Send `command`, then feed each answer line to `handle_line` until it
+    returns something other than None, and return that value."""
     fd = os.open(port, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
     old_settings = None
 
@@ -52,8 +52,6 @@ def exchange_command(port, command, timeout, classify, *, max_line=512, log=prin
         log(f"Sent: {command}", flush=True)
 
         buffer = bytearray()
-        pending_seen = False
-
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -80,25 +78,14 @@ def exchange_command(port, command, timeout, classify, *, max_line=512, log=prin
                 line = buffer.decode("ascii")
                 buffer.clear()
 
-                # A (re)starting device prints these; they are not answers.
-                if line == STARTUP_LINE or line.startswith("WARN "):
+                if _is_device_notice(line):
                     continue
                 if line.startswith("ERR ") or line.startswith("FAULT "):
                     raise TransportError("Firmware: " + line.rstrip("\r\n"))
 
-                kind = classify(line)
-                if kind == "PENDING":
-                    if pending_seen:
-                        raise TransportError("Repeated PENDING response.")
-                    pending_seen = True
-                    log("PENDING: waiting for button approval.", flush=True)
-                    continue
-
-                if not pending_seen:
-                    raise TransportError("Final result arrived before PENDING.")
-
-                log("Received: " + line.rstrip("\r\n"), flush=True)
-                return line
+                result = handle_line(line)
+                if result is not None:
+                    return result
     finally:
         try:
             if old_settings is not None:
@@ -112,3 +99,37 @@ def exchange_command(port, command, timeout, classify, *, max_line=512, log=prin
                         ) from error
         finally:
             os.close(fd)
+
+
+def query(port, command, timeout, *, max_line=512, log=print):
+    """Send a command that has exactly one answer line, and return it."""
+    return _session(port, command, timeout, lambda line: line, max_line, log)
+
+
+def exchange_command(port, command, timeout, classify, *, max_line=512, log=print):
+    """Send one approval request and return the final response line.
+
+    `classify(line)` must return "PENDING" for the intermediate pending
+    response and any other value for a final response; it raises
+    ValueError for lines that do not belong to this exchange. Exactly one
+    PENDING must precede the final response.
+    """
+    pending_seen = False
+
+    def handle(line):
+        nonlocal pending_seen
+        kind = classify(line)
+        if kind == "PENDING":
+            if pending_seen:
+                raise TransportError("Repeated PENDING response.")
+            pending_seen = True
+            log("PENDING: waiting for button approval.", flush=True)
+            return None
+
+        if not pending_seen:
+            raise TransportError("Final result arrived before PENDING.")
+
+        log("Received: " + line.rstrip("\r\n"), flush=True)
+        return line
+
+    return _session(port, command, timeout, handle, max_line, log)

@@ -15,9 +15,16 @@
 #define SIGNER_CORE_CLOCK_HZ 16000000u
 
 /* RCC */
+#define RCC_CR       REG32(0x40023800u)
+#define RCC_PLLCFGR  REG32(0x40023804u)
 #define RCC_CSR      REG32(0x40023874u)
 #define RCC_AHB1ENR  REG32(0x40023830u)
+#define RCC_AHB2ENR  REG32(0x40023834u)
 #define RCC_APB1ENR  REG32(0x40023840u)
+
+#define RCC_CR_PLLON  (1u << 24)
+#define RCC_CR_PLLRDY (1u << 25)
+#define RCC_AHB2ENR_RNGEN (1u << 6)
 
 #define RCC_AHB1ENR_GPIOAEN (1u << 0)
 #define RCC_AHB1ENR_GPIOCEN (1u << 2)
@@ -55,6 +62,40 @@
 #define USART_CR1_TE     (1u << 3)
 #define USART_CR1_RXNEIE (1u << 5)
 #define USART_CR1_UE     (1u << 13)
+
+/* Random number generator */
+#define RNG_CR       REG32(0x50060800u)
+#define RNG_SR       REG32(0x50060804u)
+#define RNG_DR       REG32(0x50060808u)
+
+#define RNG_CR_RNGEN (1u << 2)
+#define RNG_SR_DRDY  (1u << 0)
+#define RNG_SR_CECS  (1u << 1)
+#define RNG_SR_SECS  (1u << 2)
+#define RNG_SR_CEIS  (1u << 5)
+#define RNG_SR_SEIS  (1u << 6)
+
+/* Embedded flash interface */
+#define FLASH_KEYR   REG32(0x40023C04u)
+#define FLASH_SR     REG32(0x40023C0Cu)
+#define FLASH_CR     REG32(0x40023C10u)
+
+#define FLASH_SR_EOP      (1u << 0)
+#define FLASH_SR_ERRORS   (0xF0u)          /* WRPERR, PGAERR, PGPERR, PGSERR */
+#define FLASH_SR_BSY      (1u << 16)
+#define FLASH_CR_PG       (1u << 0)
+#define FLASH_CR_SER      (1u << 1)
+#define FLASH_CR_PSIZE_32 (2u << 8)
+#define FLASH_CR_STRT     (1u << 16)
+#define FLASH_CR_LOCK     (1u << 31)
+
+/*
+ * Flash layout (see docs/key-management.md):
+ *   sectors 0-2  0x08000000  48 KB  firmware (linker FLASH region)
+ *   sector  3    0x0800C000  16 KB  key store
+ */
+#define KEYSTORE_SECTOR  3u
+#define KEYSTORE_ADDRESS 0x0800C000u
 
 /* Independent watchdog */
 #define IWDG_KR      REG32(0x40003000u)

@@ -7,10 +7,11 @@ firmware that signs a release only after a physical button press, and a
 host client that turns that signature into a single-use deployment
 approval. Developed and tested entirely in simulation (Renode) and CI.
 
-> **Status: demo.** The firmware signs with the **public** RFC 8032 test
-> key, so anyone can forge its signatures. The design, protocol and tests
-> are real; the key is not. See [docs/threat-model.md](docs/threat-model.md)
-> and the [roadmap](docs/roadmap.md) (step 1 replaces the demo key).
+> **Status: lab project (v0.3).** The device generates its own Ed25519 key
+> on first boot from the hardware RNG and only ever reveals the public
+> key. The key lives in ordinary MCU flash, so protect a real board with
+> read-out protection; see [key management](docs/key-management.md), the
+> [threat model](docs/threat-model.md) and the [roadmap](docs/roadmap.md).
 
 ## How it works
 
@@ -21,6 +22,7 @@ sequenceDiagram
     participant Dev as Signer device (STM32F407)
     participant User as Human
 
+    Note over Host,Dev: once: signer-lab enroll (PUBKEY) stores the device public key
     CI->>Host: approve firmware.bin --target staging
     Host->>Host: SHA-256, random 128-bit ID, expiry<br/>register operation in SQLite
     Host->>Dev: REQUEST2 id digest target expiry
@@ -41,11 +43,11 @@ concurrent processes. A receipt can be verified offline later.
 | Part | Contents |
 | --- | --- |
 | [`hardware/`](hardware/) | KiCad 10 project: STM32F407VGT6 (LQFP-100), AP2112K-3.3 regulator, SWD, UART header, reset and approve buttons, status LED. 2-layer, 60 × 50 mm, ERC/DRC clean. |
-| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
+| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, hardware RNG and flash drivers, on-device key generation and key store, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
 | [`simulation/`](simulation/) | Renode platform matching the board's pins (UART4, PA0 button, PD12 LED). |
 | [`host/signer_lab/`](host/signer_lab/) | Python client: V2 protocol, PTY/serial transport, receipts, SQLite single-use store, CLI. |
-| [`tests/`](tests/) | 65 Python unit tests; 26 Robot Framework tests in Renode (firmware behaviour, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
-| [`docs/`](docs/) | [Protocol](docs/protocol.md), [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md). |
+| [`tests/`](tests/) | 72 Python unit tests; 28 Robot Framework tests in Renode (firmware behaviour, key generation and persistence, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
+| [`docs/`](docs/) | [Protocol](docs/protocol.md), [key management](docs/key-management.md), [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md). |
 
 ## Quick start
 
@@ -77,12 +79,16 @@ Terminal 1 starts the simulated board with its UART on `/tmp/signer-uart`:
 ./scripts/run-renode.sh
 ```
 
-Terminal 2 asks for approval:
+Every new Renode session is a new, blank chip: the board generates a key
+on boot. In terminal 2, enrol it once, then ask for approval:
 
 ```bash
+./scripts/signer-lab enroll --port /tmp/signer-uart --key-out /tmp/device.hex
+
 ./scripts/signer-lab approve firmware/build/signer.bin \
   --port /tmp/signer-uart --database /tmp/approvals.sqlite3 \
-  --target staging --receipt-out /tmp/approval.json --allow-demo-key
+  --target staging --receipt-out /tmp/approval.json \
+  --public-key-file /tmp/device.hex
 ```
 
 Press the button in the Renode monitor (terminal 1):
@@ -96,10 +102,10 @@ Then verify the receipt offline, and see that it cannot be used twice:
 
 ```bash
 ./scripts/signer-lab verify firmware/build/signer.bin \
-  --receipt /tmp/approval.json --target staging --allow-demo-key
+  --receipt /tmp/approval.json --target staging --public-key-file /tmp/device.hex
 
 ./scripts/signer-lab accept firmware/build/signer.bin --receipt /tmp/approval.json \
-  --database /tmp/approvals.sqlite3 --target staging --allow-demo-key
+  --database /tmp/approvals.sqlite3 --target staging --public-key-file /tmp/device.hex
 # Error: Mismatched or already consumed approval.
 ```
 
@@ -111,14 +117,16 @@ Every push and pull request runs, on GitHub Actions:
 - the Ed25519 known-answer test on the host;
 - all Python tests;
 - a firmware build with `-Werror` and strict warnings, with a size report;
-- all Renode tests, including a real approval over a PTY;
-- offline verification of the receipt produced by that test.
+- all Renode tests, including enrolment and a real approval over a PTY;
+- offline verification of the receipt produced by that test, with the
+  public key the simulated device generated.
 
 Actions are pinned to commit SHAs and kept up to date by Dependabot.
 
 ## Limitations
 
-- Demo key (see above). No device identity yet.
+- The key is in MCU flash; without read-out protection a debugger can
+  read it (threat T1). Enrolment is trust on first use (T2a).
 - No display: the button proves that someone was present, not that they
   saw what they approved (threat T5).
 - Single use is enforced by the host database; rolling it back re-opens

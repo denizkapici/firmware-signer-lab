@@ -5,13 +5,17 @@ import unittest
 from pathlib import Path
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
+
+import helpers
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC_KEY = bytes.fromhex(
-    "d75a980182b10ab7d54bfed3c964073a"
-    "0ee172f3daa62325af021a68f707511a"
-)
+# The C code takes the seed as an argument; any test seed works.
+SEED = bytes(range(32))
+PUBLIC_KEY = helpers.raw_public_key(Ed25519PrivateKey.from_private_bytes(SEED))
 
 
 class CryptoV2Tests(unittest.TestCase):
@@ -24,7 +28,6 @@ class CryptoV2Tests(unittest.TestCase):
         subprocess.run([
             "gcc", "-shared", "-fPIC", "-std=c11", "-O2",
             "-Wall", "-Wextra", "-Werror",
-            "-DSIGNER_DEMO_KEY=1",
             "-Ifirmware", "-Ifirmware/vendor/monocypher",
             "firmware/signer_crypto.c",
             "firmware/vendor/monocypher/monocypher.c",
@@ -36,6 +39,7 @@ class CryptoV2Tests(unittest.TestCase):
         cls.sign = cls.library.signer_sign_approval_v2
         cls.sign.argtypes = [
             ctypes.POINTER(ctypes.c_uint8),
+            ctypes.POINTER(ctypes.c_uint8),
             ctypes.c_char_p, ctypes.c_char_p,
             ctypes.c_char_p, ctypes.c_char_p,
         ]
@@ -43,8 +47,9 @@ class CryptoV2Tests(unittest.TestCase):
 
     def sign_fields(self, fields):
         output = (ctypes.c_uint8 * 64)()
+        seed = (ctypes.c_uint8 * 32)(*SEED)
         result = self.sign(
-            output, *(field.encode("ascii") for field in fields)
+            output, seed, *(field.encode("ascii") for field in fields)
         )
         return result, bytes(output)
 
@@ -72,6 +77,21 @@ class CryptoV2Tests(unittest.TestCase):
             with self.subTest(field=index):
                 with self.assertRaises(InvalidSignature):
                     verifier.verify(signature, message)
+
+    def test_other_seed_gives_other_signature(self):
+        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
+        _, first = self.sign_fields(fields)
+        output = (ctypes.c_uint8 * 64)()
+        other = (ctypes.c_uint8 * 32)(*bytes(range(1, 33)))
+        self.assertEqual(
+            self.sign(output, other, *(f.encode("ascii") for f in fields)), 1
+        )
+        self.assertNotEqual(bytes(output), first)
+
+    def test_null_seed_is_rejected(self):
+        output = (ctypes.c_uint8 * 64)()
+        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
+        self.assertEqual(self.sign(output, None, *(f.encode("ascii") for f in fields)), 0)
 
     def test_maximum_fields_are_supported(self):
         fields = ["a" * 32, "b" * 64, "x" * 32, "9007199254740991"]

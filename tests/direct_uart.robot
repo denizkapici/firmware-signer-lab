@@ -21,15 +21,37 @@ Prepare Direct UART
     Reset Emulation
     Execute Command    mach create "SignerLab"
     Execute Command    machine LoadPlatformDescription @${CURDIR}/../simulation/signer.repl
+    # Emulate a factory-blank chip: the key store sector reads 0xFF.
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/keystore-blank.bin 0x0800C000
     Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
     Execute Command    runMacro $reset
     Execute Command    emulation CreateUartPtyTerminal "direct_uart" "${PTY_DIR}/uart"
     Execute Command    connector Connect sysbus.uart4 direct_uart
     Execute Command    sysbus.gpioPortA.approveButton Release
     Execute Command    emulation RunFor "0.010"
+    Enroll Device
     ${binary}=    Get Binary File    ${FIRMWARE}
     ${digest}=    Evaluate    hashlib.sha256($binary).hexdigest()    modules=hashlib
     Set Test Variable    ${FILE_DIGEST}    ${digest}
+
+Enroll Device
+    ${process}=    Start Process
+    ...    %{SIGNER_HOST_PYTHON=python3}    -m    signer_lab    enroll
+    ...    --port    ${PTY_DIR}/uart    --key-out    ${PTY_DIR}/device.hex
+    ...    env:PYTHONPATH=${HOST_DIR}
+    ...    stdout=${PTY_DIR}/enroll.stdout    stderr=${PTY_DIR}/enroll.stderr
+    FOR    ${index}    IN RANGE    100
+        Execute Command    emulation RunFor "0.020"
+        ${running}=    Is Process Running    ${process}
+        IF    not ${running}    BREAK
+        Sleep    20 milliseconds
+    END
+    ${result}=    Wait For Process    ${process}    timeout=5 seconds    on_timeout=kill
+    Log    ${result.stdout}
+    Log    ${result.stderr}
+    Should Be Equal As Integers    ${result.rc}    0
+    Should Contain    ${result.stdout}    ENROLLED ED25519-SHA256-
+    File Should Exist    ${PTY_DIR}/device.hex
 
 Run Signer CLI
     [Arguments]    @{arguments}
@@ -51,7 +73,7 @@ Start Approval
     ...    --request-id    ${request_id}
     ...    --timeout    60
     ...    --receipt-out    ${PTY_DIR}/approval.json
-    ...    --allow-demo-key
+    ...    --public-key-file    ${PTY_DIR}/device.hex
     ...    env:PYTHONPATH=${HOST_DIR}
     ...    stdout=${PTY_DIR}/client.stdout
     ...    stderr=${PTY_DIR}/client.stderr
@@ -85,7 +107,8 @@ Cleanup Direct UART
 *** Test Cases ***
 Approval Should Produce A Receipt That Is Accepted Only Once
     ${id}=    Evaluate    "a" * 32
-    Remove File    ${CURDIR}/../firmware/build/approval-demo.json
+    Remove File    ${CURDIR}/../firmware/build/approval-receipt.json
+    Remove File    ${CURDIR}/../firmware/build/device-public-key.hex
     Start Approval    ${id}
     Execute Command    emulation RunFor "0.030"
     Execute Command    sysbus.gpioPortA.approveButton Press
@@ -96,26 +119,28 @@ Approval Should Produce A Receipt That Is Accepted Only Once
     Should Be Equal As Integers    ${result.rc}    0
     Should Be Empty    ${result.stderr}
     Should Contain    ${result.stdout}    ACCEPTED2 ${id} ${FILE_DIGEST} staging
-    Should Contain    ${result.stdout}    verified with the DEMO KEY
+    Should Contain    ${result.stdout}    verified with ED25519-SHA256-
     File Should Exist    ${PTY_DIR}/approval.json
 
     # Remove the simulated device: everything below is host-only.
     Reset Emulation
 
     ${verify}=    Run Signer CLI    verify    ${FIRMWARE}
-    ...    --receipt    ${PTY_DIR}/approval.json    --target    staging    --allow-demo-key
+    ...    --receipt    ${PTY_DIR}/approval.json    --target    staging
+    ...    --public-key-file    ${PTY_DIR}/device.hex
     Should Be Equal As Integers    ${verify.rc}    0
     Should Contain    ${verify.stdout}    VALID ${id} ${FILE_DIGEST} staging
 
     ${replay}=    Run Signer CLI    accept    ${FIRMWARE}
     ...    --receipt    ${PTY_DIR}/approval.json
     ...    --database    ${PTY_DIR}/approvals.sqlite3
-    ...    --target    staging    --allow-demo-key
+    ...    --target    staging    --public-key-file    ${PTY_DIR}/device.hex
     Should Be Equal As Integers    ${replay.rc}    1
     Should Contain    ${replay.stderr}    already consumed
     Should Not Contain    ${replay.stdout}    ACCEPTED2
 
-    Copy File    ${PTY_DIR}/approval.json    ${CURDIR}/../firmware/build/approval-demo.json
+    Copy File    ${PTY_DIR}/approval.json    ${CURDIR}/../firmware/build/approval-receipt.json
+    Copy File    ${PTY_DIR}/device.hex    ${CURDIR}/../firmware/build/device-public-key.hex
 
 Firmware Timeout Should Not Consume Approval
     ${id}=    Evaluate    "b" * 32

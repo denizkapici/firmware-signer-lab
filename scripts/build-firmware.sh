@@ -22,6 +22,9 @@ SOURCES=(
     firmware/protocol.c
     firmware/approval.c
     firmware/fault.c
+    firmware/rng.c
+    firmware/flash.c
+    firmware/keystore.c
     firmware/runtime.c
     firmware/signer_crypto.c
 )
@@ -37,7 +40,6 @@ COMMON_FLAGS=(
     -ffreestanding -fno-builtin
     -ffunction-sections -fdata-sections
     -fno-unwind-tables -fno-asynchronous-unwind-tables
-    -DSIGNER_DEMO_KEY=1
     -Ifirmware -Ifirmware/vendor/monocypher
 )
 
@@ -78,6 +80,10 @@ arm-none-eabi-objcopy -O binary \
 
 arm-none-eabi-size firmware/build/signer.elf
 
-printf '\nBuild finished: DEMO KEY BUILD\n'
+# Factory-blank contents of the key store sector (16 KB of 0xFF). Renode
+# starts flash zero-filled; tests load this once to emulate a new chip.
+head -c 16384 /dev/zero | tr '\0' '\377' > firmware/build/keystore-blank.bin
+
+printf '\nBuild finished (device-generated key)\n'
 printf 'ELF: firmware/build/signer.elf\n'
 printf 'BIN: firmware/build/signer.bin\n'

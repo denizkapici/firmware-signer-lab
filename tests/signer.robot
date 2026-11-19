@@ -16,17 +16,28 @@ ${DIGEST_B}       bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 ${FIELDS_A}       ${ID_A} ${DIGEST_A} staging 1800000000
 ${FIELDS_B}       ${ID_B} ${DIGEST_B} production 1800000001
 ${SIGNATURE}      [0-9a-f]{128}
+${KEYSTORE}       0x0800C000
 
 *** Keywords ***
 Prepare Signer
     Reset Emulation
     Execute Command    mach create "SignerLab"
     Execute Command    machine LoadPlatformDescription @${CURDIR}/../simulation/signer.repl
+    # Emulate a factory-blank chip: the key store sector reads 0xFF.
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/keystore-blank.bin 0x0800C000
     Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
     Execute Command    runMacro $reset
     Create Terminal Tester    sysbus.uart4    timeout=3    defaultPauseEmulation=true
     Start Emulation
+    Wait For Line On Uart    ^INFO KEY_GENERATED$    treatAsRegex=true
     Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
+
+Read Device Public Key
+    Write Line To Uart    PUBKEY    waitForEcho=false
+    ${line}=    Wait For Line On Uart    ^PUBKEY [0-9a-f]{64}$    treatAsRegex=true
+    ${key}=    Evaluate    $line.Line.split(" ")[1]
+    Should Not Be Equal As Strings    ${key}    d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a
+    RETURN    ${key}
 
 Send Command And Expect
     [Arguments]    ${command}    ${response}
@@ -107,21 +118,50 @@ Request Should Be Approved By A Fresh Button Press
     LED State Should Be    False
     Send Command And Expect    STATUS    READY
 
-Approval Should Match Independent Signature
+Approval Should Verify With The Device Public Key
     ${target}=    Evaluate    "x" * 32
     ${fields}=    Set Variable    ${ID_A} ${DIGEST_A} ${target} 9007199254740991
-    ${expected}=    Run Process
-    ...    %{SIGNER_HOST_PYTHON=python3}
-    ...    ${CURDIR}/expected_v2_signature.py
-    ...    ${ID_A}    ${DIGEST_A}    ${target}    9007199254740991
-    Should Be Equal As Integers    ${expected.rc}    0
-    Should Be Empty    ${expected.stderr}
-    ${signature}=    Strip String    ${expected.stdout}
-    Length Should Be    ${signature}    128
+    ${public_key}=    Read Device Public Key
     Send Command And Expect    REQUEST2 ${fields}    PENDING2 ${fields}
     Press Button After Debounce
-    Wait For Line On Uart    ^APPROVED2 ${fields} ${signature}$    timeout=6    treatAsRegex=true
+    ${line}=    Wait For Line On Uart    ^APPROVED2 ${fields} ${SIGNATURE}$    treatAsRegex=true
+    ${signature}=    Evaluate    $line.Line.split(" ")[-1]
+    ${result}=    Run Process
+    ...    %{SIGNER_HOST_PYTHON=python3}    ${CURDIR}/verify_v2_signature.py
+    ...    ${public_key}    ${ID_A}    ${DIGEST_A}    ${target}    9007199254740991    ${signature}
+    Log    ${result.stderr}
+    Should Be Equal As Integers    ${result.rc}    0
+    Should Be Equal As Strings    ${result.stdout.strip()}    SIGNATURE OK
+
+First Boot Should Generate A Key That Survives Reset
+    ${first}=    Read Device Public Key
+    Execute Command    machine Reset
+    Start Emulation
+    Wait For Line On Uart    ^INFO KEY_LOADED$    treatAsRegex=true
+    Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
+    ${second}=    Read Device Public Key
+    Should Be Equal As Strings    ${first}    ${second}
+    ${magic}=    Execute Command    sysbus ReadDoubleWord ${KEYSTORE}
+    Should Be Equal As Integers    ${magic.strip()}    0x59454B53
+
+Corrupted Key Record Should Block Signing And Not Be Replaced
+    Read Device Public Key
+    Execute Command    pause
+    # Flip one byte of the stored seed directly in flash.
+    Execute Command    sysbus WriteByte 0x0800C010 0x5A
+    Execute Command    machine Reset
+    Start Emulation
+    Wait For Line On Uart    ^WARN KEY_CORRUPT$    treatAsRegex=true
+    Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
+    Send Command And Expect    PUBKEY    ERR NO_KEY
+    Send Command And Expect    REQUEST2 ${FIELDS_A}    ERR NO_KEY
     LED State Should Be    False
+    Send Command And Expect    STATUS    READY
+    # The record is kept for inspection, not silently regenerated.
+    ${magic}=    Execute Command    sysbus ReadDoubleWord ${KEYSTORE}
+    Should Be Equal As Integers    ${magic.strip()}    0x59454B53
+    ${byte}=    Execute Command    sysbus ReadByte 0x0800C010
+    Should Be Equal As Integers    ${byte.strip()}    0x5A
 
 Held Button Should Require Release And Another Press
     Execute Command    sysbus.gpioPortA.approveButton Press

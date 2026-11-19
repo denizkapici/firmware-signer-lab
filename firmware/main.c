@@ -2,6 +2,7 @@
 
 #include "approval.h"
 #include "gpio.h"
+#include "keystore.h"
 #include "protocol.h"
 #include "system.h"
 #include "uart.h"
@@ -18,6 +19,7 @@ int main(void)
     if (watchdog_reset) {
         uart_write("WARN WATCHDOG_RESET\r\n");
     }
+    keystore_init();
     uart_write("Signer firmware started\r\n");
 
     for (;;) {

@@ -9,7 +9,7 @@ import helpers
 from helpers import fields_text, signed_line
 from signer_lab.keys import DEMO_PUBLIC_KEY
 from signer_lab.protocol import Operation, check_response
-from signer_lab.transport import exchange_command
+from signer_lab.transport import exchange_command, query
 
 FIELDS = ("a" * 32, "b" * 64, "staging", 1800000000)
 OPERATION = Operation(*FIELDS)
@@ -77,7 +77,8 @@ class TransportTests(unittest.TestCase):
 
     def test_startup_and_warning_lines_are_ignored(self):
         result = self.exchange([
-            "WARN WATCHDOG_RESET\r\n", "Signer firmware started\r\n", PENDING, APPROVED,
+            "WARN WATCHDOG_RESET\r\n", "INFO KEY_LOADED\r\n",
+            "Signer firmware started\r\n", PENDING, APPROVED,
         ])
         self.assertEqual(result, APPROVED)
 
@@ -109,6 +110,25 @@ class TransportTests(unittest.TestCase):
     def test_silent_peer_causes_host_timeout(self):
         with self.assertRaisesRegex(ValueError, "timed out"):
             self.exchange([], timeout=0.5)
+
+
+class QueryTests(unittest.TestCase):
+    def test_query_returns_first_answer_after_notices(self):
+        master, slave = pty.openpty()
+
+        def device():
+            os.read(master, 64)
+            os.write(master, b"INFO KEY_GENERATED\r\nPUBKEY " + b"ab" * 32 + b"\r\n")
+
+        worker = threading.Thread(target=device, daemon=True)
+        worker.start()
+        try:
+            line = query(os.ttyname(slave), "PUBKEY", 2.0, log=lambda *a, **k: None)
+        finally:
+            worker.join(timeout=3)
+            os.close(slave)
+            os.close(master)
+        self.assertEqual(line, "PUBKEY " + "ab" * 32 + "\r\n")
 
 
 if __name__ == "__main__":

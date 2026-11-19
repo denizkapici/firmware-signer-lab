@@ -2,6 +2,7 @@
 
 #include "approval.h"
 #include "gpio.h"
+#include "keystore.h"
 #include "uart.h"
 
 enum line_error {
@@ -34,12 +35,36 @@ static int text_starts_with(const char *text, const char *prefix)
     return 1;
 }
 
+static void write_public_key(void)
+{
+    static const char hex[] = "0123456789abcdef";
+    char encoded[65];
+
+    if (!keystore_ready()) {
+        uart_write("ERR NO_KEY\r\n");
+        return;
+    }
+
+    const uint8_t *key = keystore_public_key();
+    for (uint32_t i = 0u; i < 32u; ++i) {
+        encoded[2u * i] = hex[key[i] >> 4];
+        encoded[2u * i + 1u] = hex[key[i] & 15u];
+    }
+    encoded[64] = '\0';
+
+    uart_write("PUBKEY ");
+    uart_write(encoded);
+    uart_write("\r\n");
+}
+
 static void handle_command(const char *command, uint32_t now)
 {
     if (text_equal(command, "REQUEST2") ||
         text_starts_with(command, "REQUEST2 ")) {
         if (approval_is_pending()) {
             uart_write("ERR BUSY\r\n");
+        } else if (!keystore_ready()) {
+            uart_write("ERR NO_KEY\r\n");
         } else if (text_equal(command, "REQUEST2") ||
                    !approval_start(command + 9, now)) {
             uart_write("ERR INVALID_REQUEST\r\n");
@@ -54,6 +79,11 @@ static void handle_command(const char *command, uint32_t now)
         return;
     }
 
+    if (text_equal(command, "PUBKEY")) {
+        write_public_key();
+        return;
+    }
+
     if (text_equal(command, "PING")) {
         uart_write("PONG\r\n");
     } else if (text_equal(command, "STATUS")) {
@@ -64,6 +94,8 @@ static void handle_command(const char *command, uint32_t now)
         /* The LED shows the pending state while a request is open. */
         if (approval_is_pending()) {
             uart_write("ERR BUSY\r\n");
+        } else if (!keystore_ready()) {
+            uart_write("ERR NO_KEY\r\n");
         } else if (text_equal(command, "LED ON")) {
             led_set(1);
             uart_write("OK LED ON\r\n");

@@ -17,17 +17,22 @@ Renode and CI. Threat numbers refer to [threat-model.md](threat-model.md).
   vector table, fault reporting, watchdog; V1 removed; Python package with
   one CLI; pinned CI actions, Dependabot, cppcheck, ruff; documentation.
 
-## 1. Device-generated key and public key enrolment (T1, T2, T3, T7)
+## 1a. Device-generated key and enrolment — done (v0.3)
 
-- Generate the Ed25519 seed on first boot from the STM32 hardware RNG
-  (modelled in Renode) and store it in a dedicated flash sector.
-- New commands: `PUBKEY` (export the public key only) and `KEYID`.
-- Host `enroll` command: store the device public key once, then require it
-  (like SSH `known_hosts`).
-- Monotonic approval counter in flash, included in the signed message.
-- Remove the compiled-in demo key from production builds; keep it only
-  behind an explicit test build flag.
-- Document flash read-out protection (RDP level 1) for real hardware.
+- Ed25519 seed generated on first boot from the STM32 hardware RNG
+  (PLL48CLK, health checks, SHA-512 conditioning) and stored in flash
+  sector 3; corrupt records block signing and are never replaced silently.
+- `PUBKEY` command; host `enroll` command; host refuses the RFC 8032 test
+  key. The demo key is gone from the firmware.
+- Read-out protection documented for real hardware.
+
+## 1b. Device-side monotonic counter (T3, T7)
+
+- Counter in flash, incremented before every signature and included in
+  the signed message (protocol V3), so the device itself never signs two
+  approvals with the same counter value.
+- Host stores the last counter seen per device and rejects anything older.
+- Flash wear: append-only counter log within a sector, erased when full.
 
 ## 2. Secure bootloader (T10)
 
