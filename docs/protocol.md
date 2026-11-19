@@ -9,6 +9,8 @@ approval can never be used twice.
 
 The firmware receives the digest, not the file. It cannot establish on its
 own which file a digest represents. See [threat-model.md](threat-model.md).
+The signing key is generated on the device; see
+[key-management.md](key-management.md).
 
 > V1 (`REQUEST <8-hex-id> <digest>`, message prefix `SIGNER-LAB-V1`) was
 > removed. It bound neither target nor expiry and used a 32-bit ID. The
@@ -81,6 +83,8 @@ approved".
 | `BUTTON` | `BUTTON PRESSED` or `BUTTON RELEASED` |
 | `LED ON` / `LED OFF` | `OK LED ON` / `OK LED OFF`; `ERR BUSY` while pending |
 | `CANCEL` | `CANCELLED2 ...`, or `ERR NO_PENDING_REQUEST` |
+| `PUBKEY` | `PUBKEY <64 hex>`, or `ERR NO_KEY` |
+| `REQUEST2` without a valid key | `ERR NO_KEY` |
 | malformed `REQUEST2` | `ERR INVALID_REQUEST` |
 | anything else | `ERR UNKNOWN_COMMAND` |
 
@@ -94,20 +98,22 @@ These can appear at any time and are not answers to a command:
 | Line | Meaning |
 | --- | --- |
 | `Signer firmware started` | Boot finished. |
+| `INFO KEY_GENERATED` / `INFO KEY_LOADED` | Key store state at boot. |
+| `WARN KEY_CORRUPT`, `WARN RNG_FAILURE`, `WARN FLASH_WRITE_FAILED`, `WARN KEY_GENERATION_FAILED` | No usable key; signing is refused. |
 | `WARN WATCHDOG_RESET` | The previous run ended in a watchdog reset (real hardware; Renode does not model the reset flags). |
 | `FAULT pc=… lr=… cfsr=… hfsr=… bfar=…` | A CPU fault occurred. The LED blinks rapidly and the watchdog resets the device about 4 s later. |
 
-The host client skips the first two and aborts the exchange on `FAULT`.
+The host client skips `INFO`/`WARN` lines and the start line, and aborts
+the exchange on `FAULT`.
 
 ## Host side
 
 ```
-signer-lab request FILE --target T                # print a REQUEST2 line
-signer-lab approve FILE --port P --database DB --target T [--receipt-out R] (trust)
-signer-lab accept  FILE --receipt R --database DB --target T (trust)
-signer-lab verify  FILE --receipt R [--target T] (trust)
-
-trust: --public-key-file KEY | --allow-demo-key
+signer-lab enroll  --port P --key-out KEY            # store the device public key once
+signer-lab request FILE --target T                   # print a REQUEST2 line
+signer-lab approve FILE --port P --database DB --target T [--receipt-out R] --public-key-file KEY
+signer-lab accept  FILE --receipt R --database DB --target T --public-key-file KEY
+signer-lab verify  FILE --receipt R [--target T] --public-key-file KEY
 ```
 
 `approve` registers the operation in SQLite (with the trusted key), sends
@@ -128,7 +134,7 @@ the target. It does **not** prove that the approval is unused.
 ```json
 {
   "protocol": "SIGNER-LAB-V2",
-  "key_id": "RFC8032-TEST1-DEMO",
+  "key_id": "ED25519-SHA256-<64 hex>",
   "request_id": "<32 hex>",
   "digest": "<64 hex>",
   "target": "staging",
@@ -138,7 +144,7 @@ the target. It does **not** prove that the approval is unused.
 ```
 
 Unknown, missing or duplicated fields are rejected. `key_id` is
-`RFC8032-TEST1-DEMO` for the demo key and `ED25519-SHA256-<hex>` otherwise.
+`ED25519-SHA256-` followed by the SHA-256 of the device public key.
 
 ## Limits
 
