@@ -1,6 +1,7 @@
 """Independent expected signature for the public demo key."""
 
 import sys
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 if len(sys.argv) != 5:

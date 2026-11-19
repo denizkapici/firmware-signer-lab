@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "signer-lab"
+version = "0.2.0"
+description = "Host client for the button-approved firmware signer"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["cryptography>=42"]
+
+[project.scripts]
+signer-lab = "signer_lab.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["host"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["host", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]

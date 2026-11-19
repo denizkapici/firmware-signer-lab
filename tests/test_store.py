@@ -1,25 +1,15 @@
-import importlib.util
 import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-MODULE = (
-    Path(__file__).resolve().parents[1] / "scripts" / "approval_store.py"
-)
-SPEC = importlib.util.spec_from_file_location("approval_store", MODULE)
-store_module = importlib.util.module_from_spec(SPEC)
-import sys
-sys.path.insert(0, str(MODULE.parent))
-SPEC.loader.exec_module(store_module)
-
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from signer_protocol_v2 import approval_message
 
-ApprovalStore = store_module.ApprovalStore
-ApprovalError = store_module.ApprovalError
+import helpers  # noqa: F401  (makes signer_lab importable)
+from signer_lab.protocol import approval_message
+from signer_lab.store import ApprovalError, ApprovalStore
 
 
 class ApprovalStoreTests(unittest.TestCase):

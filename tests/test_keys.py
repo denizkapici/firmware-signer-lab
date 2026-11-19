@@ -1,15 +1,9 @@
-import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
 
-MODULE = (
-    Path(__file__).resolve().parents[1]
-    / "scripts" / "signer_key_policy.py"
-)
-SPEC = importlib.util.spec_from_file_location("signer_key_policy", MODULE)
-policy = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(policy)
+import helpers  # noqa: F401
+from signer_lab import keys as policy
 
 
 class KeyPolicyTests(unittest.TestCase):

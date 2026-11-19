@@ -1,14 +1,14 @@
 """Verify a V2 signature before atomically consuming a registered approval."""
 
-from contextlib import closing
 import math
 import sqlite3
 import time
+from contextlib import closing
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from signer_protocol_v2 import approval_message, validate_fields
+from .protocol import approval_message, validate_fields
 
 
 class ApprovalError(ValueError):

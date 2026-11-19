@@ -10,7 +10,41 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Third-party actions are pinned to full commit SHAs (tag in the comment);
+# Dependabot proposes updates. A tag can be moved, a SHA cannot.
+
 jobs:
+  static-analysis:
+    name: Static analysis
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends cppcheck
+          python3 -m pip install --user -r requirements/dev.txt
+
+      - name: cppcheck (project firmware, vendored code excluded)
+        run: |
+          cppcheck --enable=warning,style,performance,portability --std=c11 \
+            --error-exitcode=1 --inline-suppr \
+            --suppress=missingIncludeSystem \
+            -Ifirmware firmware/*.c
+
+      - name: ruff (host client and tests)
+        run: python3 -m ruff check host tests
+
   build-and-test:
     name: Build firmware and test in Renode
     runs-on: ubuntu-22.04
@@ -18,7 +52,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
       - name: Install ARM toolchain
         run: |
@@ -39,18 +75,26 @@ jobs:
 
       - name: Test Python host client
         run: |
-          test -f tests/test_signer_client.py
-          test -f tests/test_signer_transport.py
-          "$SIGNER_HOST_PYTHON" -m unittest discover -s tests -p 'test_signer_*.py' -v
+          test -f tests/test_protocol.py
+          "$SIGNER_HOST_PYTHON" -m unittest discover -s tests -p 'test_*.py' -v
 
       - name: Build firmware
         run: ./scripts/build-firmware.sh
+
+      - name: Report firmware size
+        run: |
+          {
+            echo '### Firmware size'
+            echo '```'
+            arm-none-eabi-size firmware/build/signer.elf
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Cortex-M4 crypto test
         run: bash scripts/build-crypto-test.sh
 
       - name: Run Renode tests
-        uses: antmicro/renode-test-action@v5
+        uses: antmicro/renode-test-action@3061dce7a9852ad1be770446df8261fc09e28ba3 # v5.3.2
         with:
           renode-revision: v1.17.0
           tests-to-run: 'tests/*.robot'
@@ -59,12 +103,13 @@ jobs:
       - name: Verify exported demo approval receipt
         run: |
           test -s firmware/build/approval-demo.json
-          "$SIGNER_HOST_PYTHON" scripts/signer-client.py firmware/build/signer.bin \
-            --verify-receipt firmware/build/approval-demo.json --allow-demo-key
+          ./scripts/signer-lab verify firmware/build/signer.bin \
+            --receipt firmware/build/approval-demo.json \
+            --target staging --allow-demo-key
 
       - name: Upload firmware and test reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signer-firmware-and-test-results
           path: |
