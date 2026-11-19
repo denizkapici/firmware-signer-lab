@@ -27,10 +27,12 @@ int signer_validate_approval_v2(
 );
 
 /* Signs "SIGNER-LAB-V2 <request_id> <digest> <target> <expires_at>" with
- * Ed25519. Returns 1 on success, 0 for non-canonical fields (in which case
- * the signature output must not be used). */
+ * the Ed25519 key derived from private_seed (32 bytes). Returns 1 on
+ * success, 0 for non-canonical fields (in which case the signature output
+ * must not be used). */
 int signer_sign_approval_v2(
     uint8_t signature[SIGNER_SIGNATURE_LENGTH],
+    const uint8_t private_seed[32],
     const char *request_id,
     const char *digest,
     const char *target,

@@ -1,6 +1,7 @@
 #include "approval.h"
 
 #include "gpio.h"
+#include "keystore.h"
 #include "signer_crypto.h"
 #include "system.h"
 #include "uart.h"
@@ -89,7 +90,8 @@ static void approve(void)
     /* Signing takes a noticeable time on a 16 MHz core. */
     watchdog_kick();
 
-    if (!signer_sign_approval_v2(signature, request.request_id,
+    if (!keystore_ready() ||
+        !signer_sign_approval_v2(signature, keystore_seed(), request.request_id,
                                  request.digest, request.target,
                                  request.expires_at)) {
         /* Fields were validated on entry, so this indicates a bug. */

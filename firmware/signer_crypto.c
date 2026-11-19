@@ -4,18 +4,6 @@
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
-#if !defined(SIGNER_DEMO_KEY) || SIGNER_DEMO_KEY != 1
-#error "Demo signing requires SIGNER_DEMO_KEY=1."
-#endif
-
-/* RFC 8032 TEST 1: PUBLIC TEST KEY, NOT A PRODUCTION SECRET. */
-static const uint8_t demo_seed[32] = {
-    0x9d, 0x61, 0xb1, 0x9d, 0xef, 0xfd, 0x5a, 0x60,
-    0xba, 0x84, 0x4a, 0xf4, 0x92, 0xec, 0x2c, 0xc4,
-    0x44, 0x49, 0xc5, 0x69, 0x7b, 0x32, 0x69, 0x19,
-    0x70, 0x3b, 0xac, 0x03, 0x1c, 0xae, 0x7f, 0x60
-};
-
 static int v2_lower_hex(const char *text, size_t length)
 {
     for (size_t i = 0u; i < length; ++i) {
@@ -88,12 +76,13 @@ int signer_validate_approval_v2(
 
 int signer_sign_approval_v2(
     uint8_t signature[64],
+    const uint8_t private_seed[32],
     const char *request_id,
     const char *digest,
     const char *target,
     const char *expires_at)
 {
-    if (signature == NULL ||
+    if (signature == NULL || private_seed == NULL ||
         !signer_validate_approval_v2(request_id, digest, target, expires_at)) {
         return 0;
     }
@@ -132,12 +121,13 @@ int signer_sign_approval_v2(
     uint8_t public_key[32];
 
     for (size_t i = 0u; i < sizeof(seed); ++i) {
-        seed[i] = demo_seed[i];
+        seed[i] = private_seed[i];
     }
 
+    /* key_pair wipes the seed copy. */
     crypto_ed25519_key_pair(secret_key, public_key, seed);
     crypto_ed25519_sign(signature, secret_key, message, position);
     crypto_wipe(secret_key, sizeof(secret_key));
-    crypto_wipe(seed, sizeof(seed));
+    crypto_wipe(message, sizeof(message));
     return 1;
 }

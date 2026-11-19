@@ -1,6 +1,10 @@
 mach create "SignerLab"
 
 machine LoadPlatformDescription $ORIGIN/signer.repl
+# Factory-blank key store: the device generates a new key on first boot,
+# so every new Renode session is a new device (enrol it again).
+sysbus LoadBinary $ORIGIN/../firmware/build/keystore-blank.bin 0x0800C000
+
 # Reload the image on every machine reset (e.g. after a watchdog reset).
 macro reset
 """
