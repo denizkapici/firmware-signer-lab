@@ -107,6 +107,8 @@ These can appear at any time and are not answers to a command:
 
 | Line | Meaning |
 | --- | --- |
+| `BOOT signer-lab bootloader`, `BOOT SLOT A OK version=<n>` | Bootloader verified and started the application ([secure-boot.md](secure-boot.md)). Commands sent before the application starts are lost. |
+| `BOOT SLOT A <EMPTY/BAD_...>`, `BOOT HALT` | No valid application image: the device will not answer. |
 | `Signer firmware started` | Boot finished. |
 | `INFO KEY_GENERATED` / `INFO KEY_LOADED` | Key store state at boot. |
 | `INFO COUNTER <n>` | Counter value found in flash at boot. |
@@ -114,8 +116,9 @@ These can appear at any time and are not answers to a command:
 | `WARN WATCHDOG_RESET` | The previous run ended in a watchdog reset (real hardware; Renode does not model the reset flags). |
 | `FAULT pc=… lr=… cfsr=… hfsr=… bfar=…` | A CPU fault occurred. The LED blinks rapidly and the watchdog resets the device about 4 s later. |
 
-The host client skips `INFO`/`WARN` lines and the start line, and aborts
-the exchange on `FAULT`.
+The host client skips `INFO`/`WARN` lines, successful `BOOT` lines and the
+start line, and aborts the exchange on `FAULT`, `BOOT HALT` or a failed
+`BOOT SLOT` line.
 
 ## Host side
 

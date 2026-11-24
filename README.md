@@ -7,9 +7,10 @@ firmware that signs a release only after a physical button press, and a
 host client that turns that signature into a single-use deployment
 approval. Developed and tested entirely in simulation (Renode) and CI.
 
-> **Status: lab project (v0.4).** The device generates its own Ed25519 key
+> **Status: lab project (v0.5).** The device generates its own Ed25519 key
 > on first boot from the hardware RNG and only ever reveals the public
-> key. Every signature carries a monotonic counter stored in flash. The key lives in ordinary MCU flash, so protect a real board with
+> key. Every signature carries a monotonic counter stored in flash. A
+> secure bootloader starts only firmware signed with the release key. The key lives in ordinary MCU flash, so protect a real board with
 > read-out protection; see [key management](docs/key-management.md), the
 > [threat model](docs/threat-model.md) and the [roadmap](docs/roadmap.md).
 
@@ -45,11 +46,11 @@ receipt can be verified offline later.
 | Part | Contents |
 | --- | --- |
 | [`hardware/`](hardware/) | KiCad 10 project: STM32F407VGT6 (LQFP-100), AP2112K-3.3 regulator, SWD, UART header, reset and approve buttons, status LED. 2-layer, 60 × 50 mm, ERC/DRC clean. |
-| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, hardware RNG and flash drivers, on-device key generation and key store, wear-levelled monotonic counter in flash, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
+| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc. Secure bootloader ([`firmware/boot/`](firmware/boot/)) that verifies the signed application image. Application: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, hardware RNG and flash drivers, on-device key generation and key store, wear-levelled monotonic counter in flash, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
 | [`simulation/`](simulation/) | Renode platform matching the board's pins (UART4, PA0 button, PD12 LED). |
 | [`host/signer_lab/`](host/signer_lab/) | Python client: V3 protocol, PTY/serial transport, receipts, SQLite single-use store with per-device counter tracking, CLI. |
-| [`tests/`](tests/) | 80 Python unit tests; 32 Robot Framework tests in Renode (firmware behaviour, key generation and persistence, counter persistence, rotation and torn writes, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
-| [`docs/`](docs/) | [Protocol](docs/protocol.md), [key management](docs/key-management.md), [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md). |
+| [`tests/`](tests/) | 96 Python unit tests (including the bootloader's C verifier built for the host); 42 Robot Framework tests in Renode (secure boot accept/reject paths, firmware behaviour, key generation and persistence, counter persistence, rotation and torn writes, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
+| [`docs/`](docs/) | [Protocol](docs/protocol.md), [secure boot](docs/secure-boot.md), [key management](docs/key-management.md), [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md). |
 
 ## Quick start
 
@@ -61,7 +62,7 @@ sudo apt install gcc-arm-none-eabi binutils-arm-none-eabi python3-venv
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements/host.txt
 
-./scripts/build-firmware.sh                         # firmware/build/signer.elf
+./scripts/build-firmware.sh                         # bootloader + signed application (dev key)
 python -m unittest discover -s tests -p 'test_*.py' # host tests, no device needed
 ```
 
@@ -118,8 +119,10 @@ Every push and pull request runs, on GitHub Actions:
 - cppcheck on the firmware and ruff on the Python code;
 - the Ed25519 known-answer test on the host;
 - all Python tests;
-- a firmware build with `-Werror` and strict warnings, with a size report;
-- all Renode tests, including enrolment and a real approval over a PTY;
+- a bootloader and application build with `-Werror` and strict warnings,
+  signed with a throwaway development key, with a size report;
+- all Renode tests, booting through the secure bootloader, including
+  tampered-image rejection, enrolment and a real approval over a PTY;
 - offline verification of the receipt produced by that test, with the
   public key the simulated device generated.
 
@@ -134,6 +137,8 @@ Actions are pinned to commit SHAs and kept up to date by Dependabot.
 - Single use and the counter high-water mark are both kept in the host
   database; rolling it back re-opens approvals (threat T7). The device
   counter makes such a rollback visible but does not prevent it.
+- Secure boot has no anti-rollback or A/B update path yet, and builds use
+  a development firmware signing key (threats T10, T10a; roadmap 2b, 3).
 - The PCB has not been manufactured. Renode runs its own STM32F4 model, so
   the tests validate the firmware, not the copper.
 
