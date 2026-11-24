@@ -194,5 +194,48 @@ class CliTests(unittest.TestCase):
         self.assertEqual(data["target"], "staging")
 
 
+    def test_firmware_keygen_sign_and_verify(self):
+        import struct
+
+        key = self.root / "firmware.key"
+        public = self.root / "firmware.pub"
+        app = self.root / "app.bin"
+        slot = self.root / "slot.bin"
+        app.write_bytes(struct.pack("<II", 0x20020000, 0x08020241) + bytes(64))
+
+        self.assertEqual(self.run_cli("firmware", "keygen", "--out", key).returncode, 0)
+        self.assertEqual(
+            self.run_cli("firmware", "public-key", "--key", key, "--out", public).returncode, 0
+        )
+        result = self.run_cli("firmware", "sign", app, "--key", key, "--version", "4",
+                              "--out", slot)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        result = self.run_cli("firmware", "verify", slot, "--public-key-file", public)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("VALID firmware version=4", result.stdout)
+
+        result = self.run_cli("firmware", "verify", slot, "--public-key-file", self.key_file)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Invalid firmware signature", result.stderr)
+
+    def test_firmware_sign_refuses_unbootable_image(self):
+        key = self.root / "firmware.key"
+        app = self.root / "app.bin"
+        app.write_bytes(bytes(64))  # stack pointer 0, entry 0
+        self.run_cli("firmware", "keygen", "--out", key)
+        result = self.run_cli("firmware", "sign", app, "--key", key, "--version", "1",
+                              "--out", self.root / "slot.bin")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("vector table", result.stderr)
+        self.assertFalse((self.root / "slot.bin").exists())
+
+    def test_firmware_keygen_does_not_overwrite(self):
+        key = self.root / "firmware.key"
+        key.write_text("keep")
+        result = self.run_cli("firmware", "keygen", "--out", key)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(key.read_text(), "keep")
+
 if __name__ == "__main__":
     unittest.main()
