@@ -1,20 +1,22 @@
-# Approval protocol (V2)
+# Approval protocol (V3)
 
 The host computes a file's SHA-256 digest and asks the device to approve
 one *operation*: that digest, deployed to one target, before an expiry
 time, identified by a random request ID. After a fresh press of the
-physical button, the firmware signs the operation with Ed25519. The host
-verifies the signature, then marks the operation consumed so the same
-approval can never be used twice.
+physical button, the firmware takes the next value of its monotonic
+approval counter and signs the operation together with that counter. The
+host verifies the signature, checks that the counter is newer than the
+last one it accepted from that device, then marks the operation consumed
+so the same approval can never be used twice.
 
 The firmware receives the digest, not the file. It cannot establish on its
 own which file a digest represents. See [threat-model.md](threat-model.md).
 The signing key is generated on the device; see
 [key-management.md](key-management.md).
 
-> V1 (`REQUEST <8-hex-id> <digest>`, message prefix `SIGNER-LAB-V1`) was
-> removed. It bound neither target nor expiry and used a 32-bit ID. The
-> firmware now answers `REQUEST` with `ERR UNKNOWN_COMMAND`.
+> Older versions were removed and answer `ERR UNKNOWN_COMMAND`:
+> V1 (`REQUEST`, bound neither target nor expiry, 32-bit ID) and
+> V2 (`REQUEST2`, no counter). V2 receipts do not verify with v0.4 and later.
 
 ## Transport and framing
 
@@ -41,24 +43,30 @@ The firmware has no trusted wall clock. It checks the *format* of
 
 ## Request and signed message
 
-    REQUEST2 <request_id> <digest> <target> <expires_at>
+    REQUEST3 <request_id> <digest> <target> <expires_at>
 
-The firmware signs exactly these ASCII bytes (no newline, no terminator):
+The host does not choose the counter. On approval, the firmware stores
+`counter = previous + 1` in flash and only then signs exactly these ASCII
+bytes (no newline, no terminator):
 
-    SIGNER-LAB-V2 <request_id> <digest> <target> <expires_at>
+    SIGNER-LAB-V3 <request_id> <digest> <target> <expires_at> <counter>
 
-This is plain Ed25519 over the message, not Ed25519ph. The `SIGNER-LAB-V2`
-prefix separates these signatures from any other format the same key might
-sign in the future.
+`counter` is canonical decimal, 1 to 4294967294. A reset between storing
+and signing skips a number; the device never signs two approvals with the
+same counter. Cancelled and timed-out requests do not use a number.
+
+This is plain Ed25519 over the message, not Ed25519ph. The protocol
+prefix separates these signatures from any other format the same key
+might sign.
 
 ## Responses
 
-    PENDING2   <request_id> <digest> <target> <expires_at>
-    APPROVED2  <request_id> <digest> <target> <expires_at> <signature>
-    CANCELLED2 <request_id> <digest> <target> <expires_at>
-    TIMEOUT2   <request_id> <digest> <target> <expires_at>
+    PENDING3   <request_id> <digest> <target> <expires_at>
+    APPROVED3  <request_id> <digest> <target> <expires_at> <counter> <signature>
+    CANCELLED3 <request_id> <digest> <target> <expires_at>
+    TIMEOUT3   <request_id> <digest> <target> <expires_at>
 
-Only `APPROVED2` is signed (128 lowercase hex characters). The other
+Only `APPROVED3` is signed (128 lowercase hex characters). The other
 responses are not authenticated, so the host treats them only as "not
 approved".
 
@@ -68,10 +76,10 @@ approved".
 - PA0 must be seen released for 20 ms and then pressed for 20 ms. A button
   that is already held when the request arrives must be released and
   pressed again; short pulses do not approve.
-- The firmware gives up after 5000 ms (`TIMEOUT2`).
+- The firmware gives up after 5000 ms (`TIMEOUT3`).
 - Approval, cancellation and timeout turn the LED off and wipe the stored
   request.
-- Only one request can be pending; another `REQUEST2` gets `ERR BUSY` and
+- Only one request can be pending; another `REQUEST3` gets `ERR BUSY` and
   does not replace it.
 
 ## Other commands
@@ -82,10 +90,12 @@ approved".
 | `STATUS` | `READY`, or `WAITING_APPROVAL` while pending |
 | `BUTTON` | `BUTTON PRESSED` or `BUTTON RELEASED` |
 | `LED ON` / `LED OFF` | `OK LED ON` / `OK LED OFF`; `ERR BUSY` while pending |
-| `CANCEL` | `CANCELLED2 ...`, or `ERR NO_PENDING_REQUEST` |
+| `CANCEL` | `CANCELLED3 ...`, or `ERR NO_PENDING_REQUEST` |
 | `PUBKEY` | `PUBKEY <64 hex>`, or `ERR NO_KEY` |
-| `REQUEST2` without a valid key | `ERR NO_KEY` |
-| malformed `REQUEST2` | `ERR INVALID_REQUEST` |
+| `COUNTER` | `COUNTER <n>`: last counter value used (0 before the first approval) |
+| `REQUEST3` without a valid key | `ERR NO_KEY` |
+| malformed `REQUEST3` | `ERR INVALID_REQUEST` |
+| approval when the counter cannot be stored | `ERR COUNTER_FAILURE` (nothing is signed) |
 | anything else | `ERR UNKNOWN_COMMAND` |
 
 Parser errors: `ERR COMMAND_TOO_LONG`, `ERR INVALID_CHARACTER`,
@@ -99,6 +109,7 @@ These can appear at any time and are not answers to a command:
 | --- | --- |
 | `Signer firmware started` | Boot finished. |
 | `INFO KEY_GENERATED` / `INFO KEY_LOADED` | Key store state at boot. |
+| `INFO COUNTER <n>` | Counter value found in flash at boot. |
 | `WARN KEY_CORRUPT`, `WARN RNG_FAILURE`, `WARN FLASH_WRITE_FAILED`, `WARN KEY_GENERATION_FAILED` | No usable key; signing is refused. |
 | `WARN WATCHDOG_RESET` | The previous run ended in a watchdog reset (real hardware; Renode does not model the reset flags). |
 | `FAULT pc=… lr=… cfsr=… hfsr=… bfar=…` | A CPU fault occurred. The LED blinks rapidly and the watchdog resets the device about 4 s later. |
@@ -110,14 +121,14 @@ the exchange on `FAULT`.
 
 ```
 signer-lab enroll  --port P --key-out KEY            # store the device public key once
-signer-lab request FILE --target T                   # print a REQUEST2 line
+signer-lab request FILE --target T                   # print a REQUEST3 line
 signer-lab approve FILE --port P --database DB --target T [--receipt-out R] --public-key-file KEY
 signer-lab accept  FILE --receipt R --database DB --target T --public-key-file KEY
 signer-lab verify  FILE --receipt R [--target T] --public-key-file KEY
 ```
 
 `approve` registers the operation in SQLite (with the trusted key), sends
-`REQUEST2`, waits for `PENDING2` and the final response, verifies the
+`REQUEST3`, waits for `PENDING3` and the final response, verifies the
 signature, re-hashes the file, consumes the operation and optionally
 writes a receipt. Exit codes: 0 accepted, 2 not approved (timeout or
 cancel), 1 error.
@@ -126,6 +137,11 @@ cancel), 1 error.
 `accept` of the same receipt fails with "already consumed", also across
 processes and restarts; concurrent consumers are serialised by SQLite.
 
+Consumption also requires the approval's counter to be larger than the
+highest counter already accepted from the same device key ("not newer"
+otherwise). The counter and the high-water mark are stored with the
+approval in the same transaction.
+
 `verify` checks a receipt offline: signature, file digest and optionally
 the target. It does **not** prove that the approval is unused.
 
@@ -133,12 +149,13 @@ the target. It does **not** prove that the approval is unused.
 
 ```json
 {
-  "protocol": "SIGNER-LAB-V2",
+  "protocol": "SIGNER-LAB-V3",
   "key_id": "ED25519-SHA256-<64 hex>",
   "request_id": "<32 hex>",
   "digest": "<64 hex>",
   "target": "staging",
   "expires_at": 1800000000,
+  "counter": 17,
   "signature": "<128 hex>"
 }
 ```
@@ -149,9 +166,11 @@ Unknown, missing or duplicated fields are rejected. `key_id` is
 ## Limits
 
 - Protect the database and the host clock: rolling back or editing the
-  database undermines single use.
+  database undermines single use, and restores an old counter high-water
+  mark with it (see threat T7).
 - Single-use acceptance is not exactly-once deployment. If writing the
   receipt fails after consumption, the operation stays consumed.
 - The file is re-hashed before consumption, but nothing stops it from
   changing afterwards; deploy from an immutable copy.
-- Old database schemas are rejected instead of being migrated silently.
+- Old database schemas (before V3) are rejected instead of being migrated
+  silently; start a new database file.

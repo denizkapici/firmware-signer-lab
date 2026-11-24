@@ -7,9 +7,9 @@ firmware that signs a release only after a physical button press, and a
 host client that turns that signature into a single-use deployment
 approval. Developed and tested entirely in simulation (Renode) and CI.
 
-> **Status: lab project (v0.3).** The device generates its own Ed25519 key
+> **Status: lab project (v0.4).** The device generates its own Ed25519 key
 > on first boot from the hardware RNG and only ever reveals the public
-> key. The key lives in ordinary MCU flash, so protect a real board with
+> key. Every signature carries a monotonic counter stored in flash. The key lives in ordinary MCU flash, so protect a real board with
 > read-out protection; see [key management](docs/key-management.md), the
 > [threat model](docs/threat-model.md) and the [roadmap](docs/roadmap.md).
 
@@ -25,28 +25,30 @@ sequenceDiagram
     Note over Host,Dev: once: signer-lab enroll (PUBKEY) stores the device public key
     CI->>Host: approve firmware.bin --target staging
     Host->>Host: SHA-256, random 128-bit ID, expiry<br/>register operation in SQLite
-    Host->>Dev: REQUEST2 id digest target expiry
-    Dev-->>Host: PENDING2 ... (LED on)
+    Host->>Dev: REQUEST3 id digest target expiry
+    Dev-->>Host: PENDING3 ... (LED on)
     User->>Dev: presses button (fresh press, debounced)
-    Dev->>Dev: Ed25519 sign "SIGNER-LAB-V2 id digest target expiry"
-    Dev-->>Host: APPROVED2 ... signature
-    Host->>Host: verify signature, re-hash file,<br/>consume operation (once)
-    Host-->>CI: ACCEPTED2 + receipt.json
+    Dev->>Dev: counter = counter + 1 (stored in flash)<br/>Ed25519 sign "SIGNER-LAB-V3 id digest target expiry counter"
+    Dev-->>Host: APPROVED3 ... counter signature
+    Host->>Host: verify signature, re-hash file, counter newer?<br/>consume operation (once)
+    Host-->>CI: ACCEPTED3 + receipt.json
 ```
 
-The signature binds the file digest, the deployment target and an expiry
-time. The host accepts each approval exactly once, also across restarts and
-concurrent processes. A receipt can be verified offline later.
+The signature binds the file digest, the deployment target, an expiry
+time and the device counter. The host accepts each approval exactly once,
+also across restarts and concurrent processes, and never accepts an
+approval older than the newest one it has seen from that device. A
+receipt can be verified offline later.
 
 ## What is in the repository
 
 | Part | Contents |
 | --- | --- |
 | [`hardware/`](hardware/) | KiCad 10 project: STM32F407VGT6 (LQFP-100), AP2112K-3.3 regulator, SWD, UART header, reset and approve buttons, status LED. 2-layer, 60 × 50 mm, ERC/DRC clean. |
-| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, hardware RNG and flash drivers, on-device key generation and key store, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
+| [`firmware/`](firmware/) | C11 and Thumb-2 assembly, no HAL or libc: startup and full vector table, interrupt-driven UART with ring buffer, approval state machine, hardware RNG and flash drivers, on-device key generation and key store, wear-levelled monotonic counter in flash, fault reporting, watchdog, Ed25519 via vendored [Monocypher](https://monocypher.org) 4.0.3. |
 | [`simulation/`](simulation/) | Renode platform matching the board's pins (UART4, PA0 button, PD12 LED). |
-| [`host/signer_lab/`](host/signer_lab/) | Python client: V2 protocol, PTY/serial transport, receipts, SQLite single-use store, CLI. |
-| [`tests/`](tests/) | 72 Python unit tests; 28 Robot Framework tests in Renode (firmware behaviour, key generation and persistence, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
+| [`host/signer_lab/`](host/signer_lab/) | Python client: V3 protocol, PTY/serial transport, receipts, SQLite single-use store with per-device counter tracking, CLI. |
+| [`tests/`](tests/) | 80 Python unit tests; 32 Robot Framework tests in Renode (firmware behaviour, key generation and persistence, counter persistence, rotation and torn writes, end-to-end host ↔ firmware, Ed25519 on Cortex-M4). |
 | [`docs/`](docs/) | [Protocol](docs/protocol.md), [key management](docs/key-management.md), [threat model](docs/threat-model.md), [roadmap](docs/roadmap.md). |
 
 ## Quick start
@@ -129,8 +131,9 @@ Actions are pinned to commit SHAs and kept up to date by Dependabot.
   read it (threat T1). Enrolment is trust on first use (T2a).
 - No display: the button proves that someone was present, not that they
   saw what they approved (threat T5).
-- Single use is enforced by the host database; rolling it back re-opens
-  approvals (threat T7).
+- Single use and the counter high-water mark are both kept in the host
+  database; rolling it back re-opens approvals (threat T7). The device
+  counter makes such a rollback visible but does not prevent it.
 - The PCB has not been manufactured. Renode runs its own STM32F4 model, so
   the tests validate the firmware, not the copper.
 

@@ -10,7 +10,7 @@ Renode and CI. Threat numbers refer to [threat-model.md](threat-model.md).
   state machine with debounce, cancellation and timeout.
 - Ed25519 signing on Cortex-M4 (Monocypher), RFC 8032 known-answer test on
   the host and in Renode.
-- V2 protocol binding request ID, digest, target and expiry.
+- V2 protocol binding request ID, digest, target and expiry (replaced by V3 in v0.4).
 - Host client with receipts and single-use acceptance in SQLite.
 - Renode simulation and Robot Framework tests, run in GitHub Actions.
 - Revision 0.2: firmware split into modules, interrupt-driven UART, full
@@ -26,18 +26,23 @@ Renode and CI. Threat numbers refer to [threat-model.md](threat-model.md).
   key. The demo key is gone from the firmware.
 - Read-out protection documented for real hardware.
 
-## 1b. Device-side monotonic counter (T3, T7)
+## 1b. Device-side monotonic counter — done (v0.4)
 
-- Counter in flash, incremented before every signature and included in
-  the signed message (protocol V3), so the device itself never signs two
-  approvals with the same counter value.
-- Host stores the last counter seen per device and rejects anything older.
-- Flash wear: append-only counter log within a sector, erased when full.
+- Counter stored in flash before every signature and included in the
+  signed message (protocol V3); never reused, survives resets.
+- Append-only log of `(value, ~value)` entries over sectors 2 and 4 with
+  rotation; torn entries are ignored. Firmware region reduced to 32 KB.
+- Host rejects approvals whose counter is not newer than the last one
+  accepted from the same device.
+- Correction to the earlier plan: this does **not** protect against a
+  rolled-back host database (T7), because the high-water mark is in the
+  same database. Follow-ups: keep the mark on the deployment target, and
+  an audit command that reports counter gaps (T7b).
 
 ## 2. Secure bootloader (T10)
 
-- Small bootloader at the start of flash; application moves to a second
-  slot.
+- Bootloader in sectors 0–1; the application moves to slots in sectors
+  5 and 6 (128 KB each). Counter and key stay in sectors 2–4.
 - The bootloader verifies an Ed25519 signature over the application image
   before jumping to it; an invalid image is never started.
 - A/B slots with rollback if the new image does not confirm itself.
@@ -47,7 +52,7 @@ Renode and CI. Threat numbers refer to [threat-model.md](threat-model.md).
 ## 3. Standard signature format and release gate (T11)
 
 - Emit signatures that standard tools can verify (minisign is Ed25519
-  based), while keeping domain separation from `SIGNER-LAB-V2` messages.
+  based), while keeping domain separation from `SIGNER-LAB-V3` messages.
 - A release workflow: on a version tag, build, request approval, and
   publish the artifact only together with a valid approval.
 - Optional SLSA / in-toto provenance statement signed by the device.
