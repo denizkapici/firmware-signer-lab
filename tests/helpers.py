@@ -32,7 +32,7 @@ def fields_text(fields):
     return " ".join(map(str, fields))
 
 
-def signed_line(private_key, fields):
-    """APPROVED2 line built independently of signer_lab's message helper."""
-    message = ("SIGNER-LAB-V2 " + fields_text(fields)).encode("ascii")
-    return f"APPROVED2 {fields_text(fields)} {private_key.sign(message).hex()}"
+def signed_line(private_key, fields, counter=1):
+    """APPROVED3 line built independently of signer_lab's message helper."""
+    message = f"SIGNER-LAB-V3 {fields_text(fields)} {counter}".encode("ascii")
+    return f"APPROVED3 {fields_text(fields)} {counter} {private_key.sign(message).hex()}"

@@ -39,9 +39,10 @@ class ReceiptTests(unittest.TestCase):
     def test_receipt_contains_expected_fields(self):
         save_receipt(self.receipt, self.response, trusted_key=self.public)
         data = json.loads(self.receipt.read_text())
-        self.assertEqual(data["protocol"], "SIGNER-LAB-V2")
+        self.assertEqual(data["protocol"], "SIGNER-LAB-V3")
         self.assertEqual(data["target"], "staging")
         self.assertEqual(data["expires_at"], 1800000000)
+        self.assertEqual(data["counter"], 1)
         self.assertTrue(data["key_id"].startswith("ED25519-SHA256-"))
 
     def test_changed_file_is_rejected(self):
@@ -62,7 +63,11 @@ class ReceiptTests(unittest.TestCase):
             {"expires_at": 1800000001},
             {"expires_at": "1800000000"},
             {"expires_at": True},
-            {"protocol": "SIGNER-LAB-V1"},
+            {"counter": 2},
+            {"counter": 0},
+            {"counter": "1"},
+            {"counter": 2**32 - 1},
+            {"protocol": "SIGNER-LAB-V2"},
             {"key_id": "RFC8032-TEST1-DEMO"},
             {"signature": "00" * 64},
             {"signature": "zz"},
@@ -92,7 +97,7 @@ class ReceiptTests(unittest.TestCase):
             load_receipt(self.receipt, trusted_key=other)
 
     def test_unsigned_response_cannot_be_saved(self):
-        pending = parse_response("PENDING2 " + helpers.fields_text(self.fields))
+        pending = parse_response("PENDING3 " + helpers.fields_text(self.fields))
         with self.assertRaises(ValueError):
             save_receipt(self.receipt, pending, trusted_key=self.public)
         self.assertFalse(self.receipt.exists())

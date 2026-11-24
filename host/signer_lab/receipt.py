@@ -1,4 +1,4 @@
-"""Approval receipts: a signed APPROVED2 response stored as JSON.
+"""Approval receipts: a signed APPROVED3 response stored as JSON.
 
 A receipt proves that a device holding the trusted key approved exactly
 this operation. It can be verified offline any number of times; it does
@@ -16,16 +16,20 @@ from .protocol import (
     Operation,
     Response,
     sha256_file,
+    validate_counter,
     verify_signature,
 )
 
-FIELDS = {"protocol", "key_id", "request_id", "digest", "target", "expires_at", "signature"}
+FIELDS = {
+    "protocol", "key_id", "request_id", "digest", "target", "expires_at", "counter",
+    "signature",
+}
 
 
 def save_receipt(path, response, *, trusted_key):
-    if response.status != "APPROVED2" or response.signature is None:
-        raise ValueError("Only a signed APPROVED2 response can be saved.")
-    verify_signature(response.operation, response.signature, trusted_key)
+    if response.status != "APPROVED3" or response.signature is None:
+        raise ValueError("Only a signed APPROVED3 response can be saved.")
+    verify_signature(response.operation, response.counter, response.signature, trusted_key)
 
     operation = response.operation
     receipt = {
@@ -35,6 +39,7 @@ def save_receipt(path, response, *, trusted_key):
         "digest": operation.digest,
         "target": operation.target,
         "expires_at": operation.expires_at,
+        "counter": response.counter,
         "signature": response.signature.hex(),
     }
 
@@ -72,8 +77,10 @@ def load_receipt(receipt_path, *, trusted_key):
     operation = Operation(
         receipt["request_id"], receipt["digest"], receipt["target"], receipt["expires_at"]
     )
-    response = Response("APPROVED2", operation, bytes.fromhex(signature))
-    verify_signature(operation, response.signature, trusted_key)
+    counter = receipt["counter"]
+    validate_counter(counter)
+    response = Response("APPROVED3", operation, counter, bytes.fromhex(signature))
+    verify_signature(operation, counter, response.signature, trusted_key)
     return response
 
 

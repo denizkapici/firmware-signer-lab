@@ -18,24 +18,34 @@ class EncodingTests(unittest.TestCase):
         }
 
     def test_exact_request_format(self):
-        expected = f"REQUEST2 {'a' * 32} {'b' * 64} staging 1800000000"
+        expected = f"REQUEST3 {'a' * 32} {'b' * 64} staging 1800000000"
         self.assertEqual(protocol.build_request(**self.fields), expected)
 
     def test_exact_signed_message(self):
-        expected = f"SIGNER-LAB-V2 {'a' * 32} {'b' * 64} staging 1800000000".encode("ascii")
-        self.assertEqual(protocol.approval_message(**self.fields), expected)
+        expected = (
+            f"SIGNER-LAB-V3 {'a' * 32} {'b' * 64} staging 1800000000 42".encode("ascii")
+        )
+        self.assertEqual(protocol.approval_message(**self.fields, counter=42), expected)
 
     def test_every_bound_field_changes_the_message(self):
-        original = protocol.approval_message(**self.fields)
+        original = protocol.approval_message(**self.fields, counter=1)
         for name, value in (
             ("request_id", "c" * 32),
             ("digest", "d" * 64),
             ("target", "production"),
             ("expires_at", 1800000001),
+            ("counter", 2),
         ):
             with self.subTest(field=name):
-                changed = dict(self.fields, **{name: value})
+                changed = dict(self.fields, counter=1)
+                changed[name] = value
                 self.assertNotEqual(protocol.approval_message(**changed), original)
+
+    def test_invalid_counters_are_rejected(self):
+        for counter in (0, -1, 2**32 - 1, 2**32, True, 1.0, "1"):
+            with self.subTest(counter=counter):
+                with self.assertRaises(ValueError):
+                    protocol.approval_message(**self.fields, counter=counter)
 
     def test_invalid_fields_are_rejected(self):
         for name, value in (
@@ -55,7 +65,7 @@ class EncodingTests(unittest.TestCase):
             with self.subTest(field=name, value=value):
                 changed = dict(self.fields, **{name: value})
                 with self.assertRaises(ValueError):
-                    protocol.approval_message(**changed)
+                    protocol.approval_message(**changed, counter=1)
                 with self.assertRaises(ValueError):
                     Operation(**changed)
 
@@ -75,7 +85,7 @@ class ResponseTests(unittest.TestCase):
     def test_valid_signed_response(self):
         line = signed_line(self.private, self.fields) + "\r\n"
         response = protocol.check_response(line, self.operation, self.public)
-        self.assertEqual(response.status, "APPROVED2")
+        self.assertEqual(response.status, "APPROVED3")
         self.assertEqual(response.operation, self.operation)
         self.assertEqual(len(response.signature), 64)
 
@@ -100,21 +110,21 @@ class ResponseTests(unittest.TestCase):
         signature = bytearray.fromhex(parts[-1])
         signature[0] ^= 1
         parts[-1] = signature.hex()
-        with self.assertRaisesRegex(ValueError, "Invalid V2 signature"):
+        with self.assertRaisesRegex(ValueError, "Invalid V3 signature"):
             protocol.check_response(" ".join(parts), self.operation, self.public)
 
     def test_other_key_is_rejected(self):
         other = Ed25519PrivateKey.generate()
-        with self.assertRaisesRegex(ValueError, "Invalid V2 signature"):
+        with self.assertRaisesRegex(ValueError, "Invalid V3 signature"):
             protocol.check_response(signed_line(other, self.fields), self.operation, self.public)
 
     def test_unsigned_approval_is_rejected(self):
-        line = "APPROVED2 " + helpers.fields_text(self.fields)
+        line = "APPROVED3 " + helpers.fields_text(self.fields)
         with self.assertRaises(ValueError):
             protocol.check_response(line, self.operation, self.public)
 
     def test_nonapproval_states_are_not_approvals(self):
-        for status in ("PENDING2", "CANCELLED2", "TIMEOUT2"):
+        for status in ("PENDING3", "CANCELLED3", "TIMEOUT3"):
             with self.subTest(status=status):
                 line = f"{status} {helpers.fields_text(self.fields)}"
                 response = protocol.check_response(line, self.operation, self.public)
@@ -124,8 +134,8 @@ class ResponseTests(unittest.TestCase):
     def test_malformed_responses_are_rejected(self):
         valid = signed_line(self.private, self.fields)
         for line in (
-            valid.replace("APPROVED2 ", "APPROVED ", 1),
-            valid.replace("APPROVED2 ", "APPROVED2  ", 1),
+            valid.replace("APPROVED3 ", "APPROVED ", 1),
+            valid.replace("APPROVED3 ", "APPROVED3  ", 1),
             valid.replace("1800000000", "01800000000", 1),
             valid.upper(),
             valid + " extra",
