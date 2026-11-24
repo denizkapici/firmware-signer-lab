@@ -40,7 +40,7 @@ jobs:
           cppcheck --enable=warning,style,performance,portability --std=c11 \
             --error-exitcode=1 --inline-suppr \
             --suppress=missingIncludeSystem \
-            -Ifirmware firmware/*.c
+            -Ifirmware -Ifirmware/boot firmware/*.c firmware/boot/*.c
 
       - name: ruff (host client and tests)
         run: python3 -m ruff check host tests
@@ -78,7 +78,9 @@ jobs:
           test -f tests/test_protocol.py
           "$SIGNER_HOST_PYTHON" -m unittest discover -s tests -p 'test_*.py' -v
 
-      - name: Build firmware
+      - name: Build and sign firmware
+        # A fresh development signing key per run; release signing with a
+        # protected key is added together with the release workflow.
         run: ./scripts/build-firmware.sh
 
       - name: Report firmware size
@@ -86,7 +88,7 @@ jobs:
           {
             echo '### Firmware size'
             echo '```'
-            arm-none-eabi-size firmware/build/signer.elf
+            arm-none-eabi-size firmware/build/bootloader.elf firmware/build/signer.elf
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -115,9 +117,13 @@ jobs:
         with:
           name: signer-firmware-and-test-results
           path: |
+            firmware/build/bootloader.elf
+            firmware/build/bootloader.bin
             firmware/build/signer.elf
             firmware/build/signer.bin
             firmware/build/signer.map
+            firmware/build/signer-slot-a.bin
+            firmware/build/firmware-public-key.hex
             firmware/build/approval-receipt.json
             firmware/build/device-public-key.hex
             test-results/

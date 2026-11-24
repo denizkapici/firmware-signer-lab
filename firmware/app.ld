@@ -1,53 +1,18 @@
 ENTRY(Reset_Handler)
 
+/*
+ * Application image, started by the bootloader from slot A.
+ *
+ *   0x08020000  512-byte image header (written by the signing tool)
+ *   0x08020200  vector table, then code
+ *
+ * The vector table must be 512-byte aligned for VTOR (98 entries).
+ * See docs/secure-boot.md for the full flash layout.
+ */
 MEMORY
 {
-    /* Sectors 0-1. Sectors 2-4 hold the counter log and the key store
-     * and must never be part of the image. */
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 32K
+    FLASH (rx)  : ORIGIN = 0x08020200, LENGTH = 128K - 0x200
     RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
 }
 
-_estack = ORIGIN(RAM) + LENGTH(RAM);
-
-SECTIONS
-{
-    .isr_vector :
-    {
-        KEEP(*(.isr_vector))
-    } > FLASH
-
-    .text :
-    {
-        *(.text*)
-        *(.rodata*)
-        . = ALIGN(4);
-    } > FLASH
-
-    .ARM.exidx :
-    {
-        *(.ARM.exidx*)
-        . = ALIGN(4);
-    } > FLASH
-
-    .data :
-    {
-        . = ALIGN(4);
-        _sdata = .;
-        *(.data*)
-        . = ALIGN(4);
-        _edata = .;
-    } > RAM AT > FLASH
-
-    _sidata = LOADADDR(.data);
-
-    .bss (NOLOAD) :
-    {
-        . = ALIGN(4);
-        _sbss = .;
-        *(.bss*)
-        *(COMMON)
-        . = ALIGN(4);
-        _ebss = .;
-    } > RAM
-}
+INCLUDE sections.ld

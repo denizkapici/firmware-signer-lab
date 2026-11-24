@@ -28,10 +28,14 @@ Prepare Signer
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x08008000
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x0800C000
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-64k.bin 0x08010000
-    Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
+    # Signed application in slot A, written once like a real flash image.
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/signer-slot-a.bin 0x08020000
+    # On every reset the bootloader starts and verifies slot A.
+    Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/bootloader.elf"
     Execute Command    runMacro $reset
     Create Terminal Tester    sysbus.uart4    timeout=3    defaultPauseEmulation=true
     Start Emulation
+    Wait For Line On Uart    ^BOOT SLOT A OK version=1$    treatAsRegex=true
     Wait For Line On Uart    ^INFO KEY_GENERATED$    treatAsRegex=true
     Wait For Line On Uart    ^INFO COUNTER 0$    treatAsRegex=true
     Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
@@ -142,8 +146,10 @@ Invalid Character Should Be Rejected And Parser Should Recover
     Send Command And Expect    PING    PONG
 
 SysTick Should Count Milliseconds Without UART Input
-    ${address}=    Execute Command    sysbus GetSymbolAddress "system_milliseconds"
-    ${address}=    Strip String    ${address}
+    # Symbol address from the application ELF (Renode runs the bootloader ELF).
+    ${nm}=    Run Process    arm-none-eabi-nm    ${CURDIR}/../firmware/build/signer.elf
+    Should Be Equal As Integers    ${nm.rc}    0    ${nm.stderr}
+    ${address}=    Evaluate    "0x" + [l.split()[0] for l in $nm.stdout.splitlines() if l.endswith(" system_milliseconds")][0]
     ${before}=    Execute Command    sysbus ReadDoubleWord ${address}
     Execute Command    emulation RunFor "0.100"
     ${after}=    Execute Command    sysbus ReadDoubleWord ${address}

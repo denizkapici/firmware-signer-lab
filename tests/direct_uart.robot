@@ -25,12 +25,19 @@ Prepare Direct UART
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x08008000
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x0800C000
     Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-64k.bin 0x08010000
-    Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
+    # Signed application in slot A, written once like a real flash image.
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/signer-slot-a.bin 0x08020000
+    # On every reset the bootloader starts and verifies slot A.
+    Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/bootloader.elf"
     Execute Command    runMacro $reset
     Execute Command    emulation CreateUartPtyTerminal "direct_uart" "${PTY_DIR}/uart"
     Execute Command    connector Connect sysbus.uart4 direct_uart
     Execute Command    sysbus.gpioPortA.approveButton Release
     Execute Command    emulation RunFor "0.010"
+    # Wait until the bootloader has started the application: commands sent
+    # while the bootloader verifies the image would be lost.
+    Create Terminal Tester    sysbus.uart4    timeout=10    defaultPauseEmulation=true
+    Wait For Line On Uart    ^Signer firmware started$    treatAsRegex=true
     Enroll Device
     ${binary}=    Get Binary File    ${FIRMWARE}
     ${digest}=    Evaluate    hashlib.sha256($binary).hexdigest()    modules=hashlib

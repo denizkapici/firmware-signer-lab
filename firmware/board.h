@@ -90,11 +90,13 @@
 #define FLASH_CR_LOCK     (1u << 31)
 
 /*
- * Flash layout (see docs/key-management.md):
- *   sectors 0-1  0x08000000  32 KB  firmware (linker FLASH region)
+ * Flash layout (see docs/secure-boot.md):
+ *   sectors 0-1  0x08000000  32 KB  bootloader (firmware/boot/boot.ld)
  *   sector  2    0x08008000  16 KB  approval counter log A
  *   sector  3    0x0800C000  16 KB  key store
  *   sector  4    0x08010000  64 KB  approval counter log B
+ *   sector  5    0x08020000 128 KB  application slot A (firmware/app.ld)
+ *   sector  6    0x08040000 128 KB  application slot B (reserved)
  */
 #define KEYSTORE_SECTOR  3u
 #define KEYSTORE_ADDRESS 0x0800C000u
@@ -105,6 +107,13 @@
 #define COUNTER_B_SECTOR  4u
 #define COUNTER_B_ADDRESS 0x08010000u
 #define COUNTER_B_SIZE    0x10000u
+
+/* Application slots (sectors 5 and 6, 128 KB each). Slot B is reserved
+ * for A/B updates. */
+#define SLOT_A_ADDRESS 0x08020000u
+#define SLOT_A_SIZE    0x20000u
+#define SLOT_B_ADDRESS 0x08040000u
+#define SLOT_B_SIZE    0x20000u
 
 /* Independent watchdog */
 #define IWDG_KR      REG32(0x40003000u)
