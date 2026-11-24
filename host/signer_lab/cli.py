@@ -58,7 +58,7 @@ def command_enroll(args):
 
 
 def command_request(args):
-    """Print the REQUEST2 line for manual use (no state is recorded)."""
+    """Print the REQUEST3 line for manual use (no state is recorded)."""
     operation = new_operation(args.file, args.target, args.request_id, args.ttl, time.time())
     print(operation.request_line())
     return EXIT_OK
@@ -80,11 +80,11 @@ def command_approve(args):
 
     def classify(line):
         status = check_response(line, operation, key).status
-        return "PENDING" if status == "PENDING2" else status
+        return "PENDING" if status == "PENDING3" else status
 
     line = exchange_command(args.port, operation.request_line(), args.timeout, classify)
     response = check_response(line, operation, key)
-    if response.status != "APPROVED2":
+    if response.status != "APPROVED3":
         print(f"NOT ACCEPTED: {response.status}")
         return EXIT_NOT_APPROVED
 
@@ -94,13 +94,17 @@ def command_approve(args):
 
     store.consume(
         operation.request_id, operation.digest, operation.target,
-        expires_at=operation.expires_at, signature=response.signature,
+        expires_at=operation.expires_at, counter=response.counter,
+        signature=response.signature,
     )
     if args.receipt_out is not None:
         save_receipt(args.receipt_out, response, trusted_key=key)
         print(f"Receipt saved: {args.receipt_out}")
 
-    print(f"ACCEPTED2 {operation.request_id} {operation.digest} {operation.target}")
+    print(
+        f"ACCEPTED3 {operation.request_id} {operation.digest} {operation.target} "
+        f"counter={response.counter}"
+    )
     print(f"Ed25519 signature verified with {key_id(key)}.")
     return EXIT_OK
 
@@ -118,9 +122,13 @@ def command_accept(args):
 
     ApprovalStore(args.database).consume(
         operation.request_id, operation.digest, operation.target,
-        expires_at=operation.expires_at, signature=response.signature,
+        expires_at=operation.expires_at, counter=response.counter,
+        signature=response.signature,
     )
-    print(f"ACCEPTED2 {operation.request_id} {operation.digest} {operation.target}")
+    print(
+        f"ACCEPTED3 {operation.request_id} {operation.digest} {operation.target} "
+        f"counter={response.counter}"
+    )
     return EXIT_OK
 
 
@@ -131,7 +139,7 @@ def command_verify(args):
     operation = response.operation
     print(
         f"VALID {operation.request_id} {operation.digest} {operation.target} "
-        f"{operation.expires_at}"
+        f"{operation.expires_at} counter={response.counter}"
     )
     print(f"File digest and Ed25519 signature verified with {key_id(key)}.")
     print("Note: this does not prove the approval is unused; use 'accept' for that.")
@@ -165,7 +173,7 @@ def build_parser():
     enroll.add_argument("--timeout", type=positive_finite, default=10.0)
     enroll.set_defaults(handler=command_enroll)
 
-    request = commands.add_parser("request", help="print a REQUEST2 line for a file")
+    request = commands.add_parser("request", help="print a REQUEST3 line for a file")
     request.add_argument("file", type=Path)
     request.add_argument("--target", required=True)
     request.add_argument("--request-id")

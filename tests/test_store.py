@@ -1,3 +1,4 @@
+import sqlite3
 import tempfile
 import threading
 import unittest
@@ -39,6 +40,7 @@ class ApprovalStoreTests(unittest.TestCase):
             "digest": self.digest,
             "target": self.target,
             "expires_at": 200,
+            "counter": 1,
         }
         fields.update(changes)
         return self.private_key.sign(approval_message(**fields))
@@ -50,6 +52,7 @@ class ApprovalStoreTests(unittest.TestCase):
             "target": self.target,
             "now": 150,
             "expires_at": 200,
+            "counter": 1,
             "signature": self.signature,
         }
         values.update(changes)
@@ -66,7 +69,7 @@ class ApprovalStoreTests(unittest.TestCase):
         with self.assertRaises(ApprovalError):
             reopened.consume(
                 self.request_id, self.digest, self.target, now=151,
-                expires_at=200, signature=self.signature,
+                expires_at=200, counter=1, signature=self.signature,
             )
 
     def test_expired_approval_is_rejected(self):
@@ -150,7 +153,7 @@ class ApprovalStoreTests(unittest.TestCase):
     def test_other_key_cannot_approve_registered_request(self):
         other_key = Ed25519PrivateKey.generate()
         message = approval_message(
-            self.request_id, self.digest, self.target, 200
+            self.request_id, self.digest, self.target, 200, 1
         )
         with self.assertRaisesRegex(ApprovalError, "signature"):
             self.consume(signature=other_key.sign(message))
@@ -172,13 +175,87 @@ class ApprovalStoreTests(unittest.TestCase):
             )
         self.consume()
 
-    def test_v1_signature_cannot_approve_v2_request(self):
-        message = (
-            f"SIGNER-LAB-V1 {self.request_id} {self.digest}"
-        ).encode("ascii")
-        with self.assertRaisesRegex(ApprovalError, "signature"):
-            self.consume(signature=self.private_key.sign(message))
+    def test_older_protocol_signatures_cannot_approve_v3_request(self):
+        for message in (
+            f"SIGNER-LAB-V1 {self.request_id} {self.digest}",
+            f"SIGNER-LAB-V2 {self.request_id} {self.digest} {self.target} 200",
+        ):
+            with self.subTest(message=message):
+                with self.assertRaisesRegex(ApprovalError, "signature"):
+                    self.consume(signature=self.private_key.sign(message.encode("ascii")))
         self.consume()
+
+    def test_signature_with_other_counter_is_rejected(self):
+        with self.assertRaisesRegex(ApprovalError, "signature"):
+            self.consume(counter=2)
+        self.consume()
+
+    def register_and_consume(self, request_id, counter, now=150):
+        self.store.register(
+            request_id, self.digest, self.target,
+            now=100, expires_at=200, trusted_key=self.public_key,
+        )
+        self.store.consume(
+            request_id, self.digest, self.target, now=now, expires_at=200,
+            counter=counter,
+            signature=self.sign(request_id=request_id, counter=counter),
+        )
+
+    def test_counter_must_increase_per_device(self):
+        self.consume(counter=5, signature=self.sign(counter=5))
+        self.assertEqual(self.store.last_counter(self.public_key), 5)
+        for counter in (5, 4):
+            with self.subTest(counter=counter):
+                with self.assertRaisesRegex(ApprovalError, "not newer"):
+                    self.register_and_consume(f"{counter:032x}", counter)
+        self.register_and_consume("c" * 32, 6)
+        self.assertEqual(self.store.last_counter(self.public_key), 6)
+
+    def test_rejected_counter_leaves_request_pending(self):
+        self.consume(counter=5, signature=self.sign(counter=5))
+        with self.assertRaisesRegex(ApprovalError, "not newer"):
+            self.register_and_consume("d" * 32, 3)
+        # The same request can still be accepted with a valid newer counter.
+        self.store.consume(
+            "d" * 32, self.digest, self.target, now=150, expires_at=200,
+            counter=7, signature=self.sign(request_id="d" * 32, counter=7),
+        )
+
+    def test_counters_are_tracked_per_device(self):
+        self.consume(counter=9, signature=self.sign(counter=9))
+        other = Ed25519PrivateKey.generate()
+        other_public = other.public_key().public_bytes(
+            serialization.Encoding.Raw, serialization.PublicFormat.Raw,
+        )
+        self.store.register(
+            "e" * 32, self.digest, self.target,
+            now=100, expires_at=200, trusted_key=other_public,
+        )
+        message = approval_message("e" * 32, self.digest, self.target, 200, 1)
+        self.store.consume(
+            "e" * 32, self.digest, self.target, now=150, expires_at=200,
+            counter=1, signature=other.sign(message),
+        )
+        self.assertEqual(self.store.last_counter(other_public), 1)
+        self.assertEqual(self.store.last_counter(self.public_key), 9)
+
+    def test_invalid_counter_values_are_rejected(self):
+        for counter in (0, -1, 2**32 - 1, True, "1"):
+            with self.subTest(counter=counter):
+                with self.assertRaises(ApprovalError):
+                    self.consume(counter=counter)
+        self.consume()
+
+    def test_old_schema_is_refused(self):
+        old = Path(self.path).with_name("old.sqlite3")
+        connection = sqlite3.connect(old)
+        connection.execute(
+            "CREATE TABLE approvals (request_id TEXT PRIMARY KEY, trusted_key BLOB)"
+        )
+        connection.commit()
+        connection.close()
+        with self.assertRaisesRegex(ApprovalError, "Old database schema"):
+            ApprovalStore(old)
 
 
 if __name__ == "__main__":

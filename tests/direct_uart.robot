@@ -21,8 +21,10 @@ Prepare Direct UART
     Reset Emulation
     Execute Command    mach create "SignerLab"
     Execute Command    machine LoadPlatformDescription @${CURDIR}/../simulation/signer.repl
-    # Emulate a factory-blank chip: the key store sector reads 0xFF.
-    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/keystore-blank.bin 0x0800C000
+    # Emulate a factory-blank chip: data sectors 2, 3 and 4 read 0xFF.
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x08008000
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-16k.bin 0x0800C000
+    Execute Command    sysbus LoadBinary @${CURDIR}/../firmware/build/blank-64k.bin 0x08010000
     Execute Command    macro reset "sysbus LoadELF @${CURDIR}/../firmware/build/signer.elf"
     Execute Command    runMacro $reset
     Execute Command    emulation CreateUartPtyTerminal "direct_uart" "${PTY_DIR}/uart"
@@ -83,7 +85,7 @@ Start Approval
 
 Client Has Sent Request
     ${output}=    Get File    ${PTY_DIR}/client.stdout
-    Should Contain    ${output}    Sent: REQUEST2 ${ACTIVE_ID} ${FILE_DIGEST} staging
+    Should Contain    ${output}    Sent: REQUEST3 ${ACTIVE_ID} ${FILE_DIGEST} staging
 
 Advance Until Pending
     FOR    ${index}    IN RANGE    40
@@ -94,7 +96,7 @@ Advance Until Pending
         ...    Should Contain    ${output}    PENDING: waiting for button approval.
         IF    ${pending}    RETURN
     END
-    Fail    Host client did not receive PENDING2.
+    Fail    Host client did not receive PENDING3.
 
 Cleanup Direct UART
     Run Keyword And Continue On Failure    Terminate All Processes    kill=True
@@ -118,7 +120,7 @@ Approval Should Produce A Receipt That Is Accepted Only Once
     Log    ${result.stderr}
     Should Be Equal As Integers    ${result.rc}    0
     Should Be Empty    ${result.stderr}
-    Should Contain    ${result.stdout}    ACCEPTED2 ${id} ${FILE_DIGEST} staging
+    Should Contain    ${result.stdout}    ACCEPTED3 ${id} ${FILE_DIGEST} staging counter=1
     Should Contain    ${result.stdout}    verified with ED25519-SHA256-
     File Should Exist    ${PTY_DIR}/approval.json
 
@@ -137,7 +139,7 @@ Approval Should Produce A Receipt That Is Accepted Only Once
     ...    --target    staging    --public-key-file    ${PTY_DIR}/device.hex
     Should Be Equal As Integers    ${replay.rc}    1
     Should Contain    ${replay.stderr}    already consumed
-    Should Not Contain    ${replay.stdout}    ACCEPTED2
+    Should Not Contain    ${replay.stdout}    ACCEPTED3
 
     Copy File    ${PTY_DIR}/approval.json    ${CURDIR}/../firmware/build/approval-receipt.json
     Copy File    ${PTY_DIR}/device.hex    ${CURDIR}/../firmware/build/device-public-key.hex
@@ -151,8 +153,8 @@ Firmware Timeout Should Not Consume Approval
     Log    ${result.stderr}
     Should Be Equal As Integers    ${result.rc}    2
     Should Be Empty    ${result.stderr}
-    Should Contain    ${result.stdout}    NOT ACCEPTED: TIMEOUT2
-    Should Not Contain    ${result.stdout}    ACCEPTED2 ${id}
+    Should Contain    ${result.stdout}    NOT ACCEPTED: TIMEOUT3
+    Should Not Contain    ${result.stdout}    ACCEPTED3 ${id}
     File Should Not Exist    ${PTY_DIR}/approval.json
 
     ${check}=    Run Process

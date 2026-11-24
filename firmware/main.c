@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "approval.h"
+#include "counter.h"
 #include "gpio.h"
 #include "keystore.h"
 #include "protocol.h"
@@ -20,6 +21,10 @@ int main(void)
         uart_write("WARN WATCHDOG_RESET\r\n");
     }
     keystore_init();
+    counter_init();
+    uart_write("INFO COUNTER ");
+    uart_write_u32(counter_value());
+    uart_write("\r\n");
     uart_write("Signer firmware started\r\n");
 
     for (;;) {

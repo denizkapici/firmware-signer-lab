@@ -4,9 +4,11 @@ machine LoadPlatformDescription $ORIGIN/signer.repl
 
 showAnalyzer sysbus.uart4
 
-# Factory-blank key store: the device generates a new key on first boot,
+# Factory-blank data sectors (counter log, key store): the device generates a new key on first boot,
 # so every new Renode session is a new device (enrol it again).
-sysbus LoadBinary $ORIGIN/../firmware/build/keystore-blank.bin 0x0800C000
+sysbus LoadBinary $ORIGIN/../firmware/build/blank-16k.bin 0x08008000
+sysbus LoadBinary $ORIGIN/../firmware/build/blank-16k.bin 0x0800C000
+sysbus LoadBinary $ORIGIN/../firmware/build/blank-64k.bin 0x08010000
 
 # Reload the image on every machine reset (e.g. after a watchdog reset).
 macro reset

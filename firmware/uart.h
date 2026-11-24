@@ -15,6 +15,7 @@ int uart_read_byte(uint8_t *byte);
 int uart_take_overflow(void);
 
 void uart_write(const char *text);
+void uart_write_u32(uint32_t value);  /* canonical decimal */
 
 /* Fault-safe output: polls the hardware directly, no interrupts. */
 void uart_write_polled(const char *text);

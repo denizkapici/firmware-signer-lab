@@ -115,7 +115,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         parts = result.stdout.strip().split(" ")
-        self.assertEqual(parts[:4], ["REQUEST2", "c" * 32, self.fields[1], "staging"])
+        self.assertEqual(parts[:4], ["REQUEST3", "c" * 32, self.fields[1], "staging"])
 
     def test_verify_with_selected_key(self):
         result = self.run_cli(
@@ -159,7 +159,7 @@ class CliTests(unittest.TestCase):
         )
         first = self.run_cli(*arguments)
         self.assertEqual(first.returncode, 0, first.stderr)
-        self.assertIn("ACCEPTED2", first.stdout)
+        self.assertIn("ACCEPTED3", first.stdout)
 
         second = self.run_cli(*arguments)
         self.assertEqual(second.returncode, 1)

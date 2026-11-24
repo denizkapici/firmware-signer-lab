@@ -25,6 +25,7 @@ SOURCES=(
     firmware/rng.c
     firmware/flash.c
     firmware/keystore.c
+    firmware/counter.c
     firmware/runtime.c
     firmware/signer_crypto.c
 )
@@ -80,9 +81,11 @@ arm-none-eabi-objcopy -O binary \
 
 arm-none-eabi-size firmware/build/signer.elf
 
-# Factory-blank contents of the key store sector (16 KB of 0xFF). Renode
-# starts flash zero-filled; tests load this once to emulate a new chip.
-head -c 16384 /dev/zero | tr '\0' '\377' > firmware/build/keystore-blank.bin
+# Factory-blank flash (0xFF) for the data sectors: 16 KB (sectors 2, 3)
+# and 64 KB (sector 4). Renode starts flash zero-filled; tests load these
+# once to emulate a new chip.
+head -c 16384 /dev/zero | tr '\0' '\377' > firmware/build/blank-16k.bin
+head -c 65536 /dev/zero | tr '\0' '\377' > firmware/build/blank-64k.bin
 
 printf '\nBuild finished (device-generated key)\n'
 printf 'ELF: firmware/build/signer.elf\n'

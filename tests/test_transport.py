@@ -13,13 +13,13 @@ from signer_lab.transport import exchange_command, query
 
 FIELDS = ("a" * 32, "b" * 64, "staging", 1800000000)
 OPERATION = Operation(*FIELDS)
-PENDING = f"PENDING2 {fields_text(FIELDS)}\r\n"
+PENDING = f"PENDING3 {fields_text(FIELDS)}\r\n"
 APPROVED = signed_line(helpers.demo_private_key(), FIELDS) + "\r\n"
 
 
 def classify(line):
     status = check_response(line, OPERATION, DEMO_PUBLIC_KEY).status
-    return "PENDING" if status == "PENDING2" else status
+    return "PENDING" if status == "PENDING3" else status
 
 
 class TransportTests(unittest.TestCase):

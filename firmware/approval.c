@@ -1,5 +1,6 @@
 #include "approval.h"
 
+#include "counter.h"
 #include "gpio.h"
 #include "keystore.h"
 #include "signer_crypto.h"
@@ -81,25 +82,42 @@ static void finish(const char *status)
     wipe(&request, sizeof(request));
 }
 
+static void abandon(const char *error)
+{
+    uart_write(error);
+    pending = 0;
+    armed = 0;
+    led_set(0);
+    wipe(&request, sizeof(request));
+}
+
 static void approve(void)
 {
     static const char hex[] = "0123456789abcdef";
     uint8_t signature[SIGNER_SIGNATURE_LENGTH];
     char encoded[2u * SIGNER_SIGNATURE_LENGTH + 1u];
+    uint32_t counter;
+
+    if (!keystore_ready()) {
+        abandon("ERR NO_KEY\r\n");
+        return;
+    }
+
+    /* Store the new counter value before signing: after a reset the
+     * device may skip a number, but it can never sign one twice. */
+    if (!counter_next(&counter)) {
+        abandon("ERR COUNTER_FAILURE\r\n");
+        return;
+    }
 
     /* Signing takes a noticeable time on a 16 MHz core. */
     watchdog_kick();
 
-    if (!keystore_ready() ||
-        !signer_sign_approval_v2(signature, keystore_seed(), request.request_id,
-                                 request.digest, request.target,
-                                 request.expires_at)) {
+    if (!signer_sign_approval(signature, keystore_seed(), request.request_id,
+                              request.digest, request.target,
+                              request.expires_at, counter)) {
         /* Fields were validated on entry, so this indicates a bug. */
-        uart_write("ERR SIGNING_FAILED\r\n");
-        pending = 0;
-        armed = 0;
-        led_set(0);
-        wipe(&request, sizeof(request));
+        abandon("ERR SIGNING_FAILED\r\n");
         return;
     }
 
@@ -113,8 +131,10 @@ static void approve(void)
     armed = 0;
     led_set(0);
 
-    uart_write("APPROVED2 ");
+    uart_write("APPROVED3 ");
     write_fields();
+    uart_write(" ");
+    uart_write_u32(counter);
     uart_write(" ");
     uart_write(encoded);
     uart_write("\r\n");
@@ -143,7 +163,7 @@ int approval_start(const char *fields, uint32_t now)
         !read_field(&cursor, parsed.target, sizeof(parsed.target), 0) ||
         !read_field(&cursor, parsed.expires_at,
                     sizeof(parsed.expires_at), 1) ||
-        !signer_validate_approval_v2(parsed.request_id, parsed.digest,
+        !signer_validate_request(parsed.request_id, parsed.digest,
                                      parsed.target, parsed.expires_at)) {
         return 0;
     }
@@ -156,7 +176,7 @@ int approval_start(const char *fields, uint32_t now)
     pending = 1;
     led_set(1);
 
-    uart_write("PENDING2 ");
+    uart_write("PENDING3 ");
     write_fields();
     uart_write("\r\n");
     return 1;
@@ -168,7 +188,7 @@ int approval_cancel(void)
         return 0;
     }
 
-    finish("CANCELLED2");
+    finish("CANCELLED3");
     return 1;
 }
 
@@ -179,7 +199,7 @@ void approval_poll(uint32_t now)
     }
 
     if ((uint32_t)(now - started_at) >= APPROVAL_TIMEOUT_MS) {
-        finish("TIMEOUT2");
+        finish("TIMEOUT3");
         return;
     }
 

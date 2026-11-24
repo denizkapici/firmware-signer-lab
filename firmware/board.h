@@ -91,11 +91,20 @@
 
 /*
  * Flash layout (see docs/key-management.md):
- *   sectors 0-2  0x08000000  48 KB  firmware (linker FLASH region)
+ *   sectors 0-1  0x08000000  32 KB  firmware (linker FLASH region)
+ *   sector  2    0x08008000  16 KB  approval counter log A
  *   sector  3    0x0800C000  16 KB  key store
+ *   sector  4    0x08010000  64 KB  approval counter log B
  */
 #define KEYSTORE_SECTOR  3u
 #define KEYSTORE_ADDRESS 0x0800C000u
+
+#define COUNTER_A_SECTOR  2u
+#define COUNTER_A_ADDRESS 0x08008000u
+#define COUNTER_A_SIZE    0x4000u
+#define COUNTER_B_SECTOR  4u
+#define COUNTER_B_ADDRESS 0x08010000u
+#define COUNTER_B_SIZE    0x10000u
 
 /* Independent watchdog */
 #define IWDG_KR      REG32(0x40003000u)
