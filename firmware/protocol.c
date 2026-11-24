@@ -1,6 +1,7 @@
 #include "protocol.h"
 
 #include "approval.h"
+#include "counter.h"
 #include "gpio.h"
 #include "keystore.h"
 #include "uart.h"
@@ -59,13 +60,13 @@ static void write_public_key(void)
 
 static void handle_command(const char *command, uint32_t now)
 {
-    if (text_equal(command, "REQUEST2") ||
-        text_starts_with(command, "REQUEST2 ")) {
+    if (text_equal(command, "REQUEST3") ||
+        text_starts_with(command, "REQUEST3 ")) {
         if (approval_is_pending()) {
             uart_write("ERR BUSY\r\n");
         } else if (!keystore_ready()) {
             uart_write("ERR NO_KEY\r\n");
-        } else if (text_equal(command, "REQUEST2") ||
+        } else if (text_equal(command, "REQUEST3") ||
                    !approval_start(command + 9, now)) {
             uart_write("ERR INVALID_REQUEST\r\n");
         }
@@ -81,6 +82,13 @@ static void handle_command(const char *command, uint32_t now)
 
     if (text_equal(command, "PUBKEY")) {
         write_public_key();
+        return;
+    }
+
+    if (text_equal(command, "COUNTER")) {
+        uart_write("COUNTER ");
+        uart_write_u32(counter_value());
+        uart_write("\r\n");
         return;
     }
 

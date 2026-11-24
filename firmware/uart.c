@@ -104,6 +104,20 @@ void uart_write(const char *text)
     uart_write_polled(text);
 }
 
+void uart_write_u32(uint32_t value)
+{
+    char text[11];
+    uint32_t position = sizeof(text) - 1u;
+
+    text[position] = '\0';
+    do {
+        text[--position] = (char)('0' + value % 10u);
+        value /= 10u;
+    } while (value != 0u);
+
+    uart_write(&text[position]);
+}
+
 void uart_write_hex32_polled(uint32_t value)
 {
     static const char hex[] = "0123456789abcdef";

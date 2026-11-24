@@ -1,3 +1,6 @@
+"""Firmware signing code (signer_crypto.c) built for the host and checked
+against an independent Python implementation of the V3 message."""
+
 import ctypes
 import subprocess
 import tempfile
@@ -16,14 +19,19 @@ ROOT = Path(__file__).resolve().parents[1]
 # The C code takes the seed as an argument; any test seed works.
 SEED = bytes(range(32))
 PUBLIC_KEY = helpers.raw_public_key(Ed25519PrivateKey.from_private_bytes(SEED))
+FIELDS = ["a" * 32, "b" * 64, "staging", "1800000000"]
 
 
-class CryptoV2Tests(unittest.TestCase):
+def message(fields, counter):
+    return f"SIGNER-LAB-V3 {' '.join(fields)} {counter}".encode("ascii")
+
+
+class CryptoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         directory = tempfile.TemporaryDirectory()
         cls.addClassCleanup(directory.cleanup)
-        library = Path(directory.name) / "signer-v2.so"
+        library = Path(directory.name) / "signer-crypto.so"
 
         subprocess.run([
             "gcc", "-shared", "-fPIC", "-std=c11", "-O2",
@@ -36,74 +44,71 @@ class CryptoV2Tests(unittest.TestCase):
         ], cwd=ROOT, check=True)
 
         cls.library = ctypes.CDLL(str(library))
-        cls.sign = cls.library.signer_sign_approval_v2
+        cls.sign = cls.library.signer_sign_approval
         cls.sign.argtypes = [
             ctypes.POINTER(ctypes.c_uint8),
             ctypes.POINTER(ctypes.c_uint8),
             ctypes.c_char_p, ctypes.c_char_p,
             ctypes.c_char_p, ctypes.c_char_p,
+            ctypes.c_uint32,
         ]
         cls.sign.restype = ctypes.c_int
 
-    def sign_fields(self, fields):
+    def sign_fields(self, fields, counter=1, seed=SEED):
         output = (ctypes.c_uint8 * 64)()
-        seed = (ctypes.c_uint8 * 32)(*SEED)
+        seed_buffer = None if seed is None else (ctypes.c_uint8 * 32)(*seed)
         result = self.sign(
-            output, seed, *(field.encode("ascii") for field in fields)
+            output, seed_buffer, *(field.encode("ascii") for field in fields), counter
         )
         return result, bytes(output)
 
-    def test_c_signature_matches_python_message(self):
-        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
-        result, signature = self.sign_fields(fields)
-        self.assertEqual(result, 1)
-        message = ("SIGNER-LAB-V2 " + " ".join(fields)).encode("ascii")
+    def verify(self, signature, fields, counter):
         Ed25519PublicKey.from_public_bytes(PUBLIC_KEY).verify(
-            signature, message
+            signature, message(fields, counter)
         )
 
-    def test_changed_fields_invalidate_signature(self):
-        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
-        result, signature = self.sign_fields(fields)
-        self.assertEqual(result, 1)
-        verifier = Ed25519PublicKey.from_public_bytes(PUBLIC_KEY)
+    def test_c_signature_matches_python_message(self):
+        for counter in (1, 9, 10, 12345, 0xFFFFFFFE):
+            with self.subTest(counter=counter):
+                result, signature = self.sign_fields(FIELDS, counter)
+                self.assertEqual(result, 1)
+                self.verify(signature, FIELDS, counter)
 
-        for index, value in enumerate(
-            ["c" * 32, "d" * 64, "production", "1800000001"]
-        ):
-            changed = list(fields)
+    def test_changed_fields_or_counter_invalidate_signature(self):
+        _, signature = self.sign_fields(FIELDS, 7)
+        for index, value in ((0, "c" * 32), (1, "d" * 64), (2, "production"),
+                             (3, "1800000001")):
+            changed = list(FIELDS)
             changed[index] = value
-            message = ("SIGNER-LAB-V2 " + " ".join(changed)).encode("ascii")
             with self.subTest(field=index):
                 with self.assertRaises(InvalidSignature):
-                    verifier.verify(signature, message)
+                    self.verify(signature, changed, 7)
+        with self.assertRaises(InvalidSignature):
+            self.verify(signature, FIELDS, 8)
 
     def test_other_seed_gives_other_signature(self):
-        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
-        _, first = self.sign_fields(fields)
-        output = (ctypes.c_uint8 * 64)()
-        other = (ctypes.c_uint8 * 32)(*bytes(range(1, 33)))
-        self.assertEqual(
-            self.sign(output, other, *(f.encode("ascii") for f in fields)), 1
-        )
-        self.assertNotEqual(bytes(output), first)
+        _, first = self.sign_fields(FIELDS)
+        result, other = self.sign_fields(FIELDS, seed=bytes(range(1, 33)))
+        self.assertEqual(result, 1)
+        self.assertNotEqual(first, other)
 
     def test_null_seed_is_rejected(self):
-        output = (ctypes.c_uint8 * 64)()
-        fields = ["a" * 32, "b" * 64, "staging", "1800000000"]
-        self.assertEqual(self.sign(output, None, *(f.encode("ascii") for f in fields)), 0)
+        result, _ = self.sign_fields(FIELDS, seed=None)
+        self.assertEqual(result, 0)
+
+    def test_invalid_counters_are_rejected(self):
+        for counter in (0, 0xFFFFFFFF):
+            with self.subTest(counter=counter):
+                result, _ = self.sign_fields(FIELDS, counter)
+                self.assertEqual(result, 0)
 
     def test_maximum_fields_are_supported(self):
         fields = ["a" * 32, "b" * 64, "x" * 32, "9007199254740991"]
-        result, signature = self.sign_fields(fields)
+        result, signature = self.sign_fields(fields, 0xFFFFFFFE)
         self.assertEqual(result, 1)
-        message = ("SIGNER-LAB-V2 " + " ".join(fields)).encode("ascii")
-        Ed25519PublicKey.from_public_bytes(PUBLIC_KEY).verify(
-            signature, message
-        )
+        self.verify(signature, fields, 0xFFFFFFFE)
 
     def test_invalid_fields_are_rejected(self):
-        original = ["a" * 32, "b" * 64, "staging", "1800000000"]
         for index, value in (
             (0, "a" * 8), (0, "A" * 32),
             (1, "g" * 64),
@@ -113,7 +118,7 @@ class CryptoV2Tests(unittest.TestCase):
             (3, "9007199254740992"),
             (3, "99999999999999999"),
         ):
-            fields = list(original)
+            fields = list(FIELDS)
             fields[index] = value
             with self.subTest(field=index, value=value):
                 result, _ = self.sign_fields(fields)

@@ -4,7 +4,7 @@
 #include "monocypher.h"
 #include "monocypher-ed25519.h"
 
-static int v2_lower_hex(const char *text, size_t length)
+static int lower_hex(const char *text, size_t length)
 {
     for (size_t i = 0u; i < length; ++i) {
         char ch = text[i];
@@ -16,7 +16,7 @@ static int v2_lower_hex(const char *text, size_t length)
     return text[length] == '\0';
 }
 
-int signer_validate_approval_v2(
+int signer_validate_request(
     const char *request_id,
     const char *digest,
     const char *target,
@@ -27,8 +27,8 @@ int signer_validate_approval_v2(
         return 0;
     }
 
-    if (!v2_lower_hex(request_id, 32u) ||
-        !v2_lower_hex(digest, 64u)) {
+    if (!lower_hex(request_id, 32u) ||
+        !lower_hex(digest, 64u)) {
         return 0;
     }
 
@@ -74,16 +74,18 @@ int signer_validate_approval_v2(
     return 1;
 }
 
-int signer_sign_approval_v2(
+int signer_sign_approval(
     uint8_t signature[64],
     const uint8_t private_seed[32],
     const char *request_id,
     const char *digest,
     const char *target,
-    const char *expires_at)
+    const char *expires_at,
+    uint32_t counter)
 {
     if (signature == NULL || private_seed == NULL ||
-        !signer_validate_approval_v2(request_id, digest, target, expires_at)) {
+        counter == 0u || counter == UINT32_MAX ||
+        !signer_validate_request(request_id, digest, target, expires_at)) {
         return 0;
     }
 
@@ -96,7 +98,7 @@ int signer_sign_approval_v2(
         ++expiry_length;
     }
 
-    static const char prefix[] = "SIGNER-LAB-V2 ";
+    static const char prefix[] = "SIGNER-LAB-V3 ";
     uint8_t message[192];
     size_t position = 0u;
 
@@ -114,6 +116,17 @@ int signer_sign_approval_v2(
         for (size_t i = 0u; i < lengths[field]; ++i) {
             message[position++] = (uint8_t)fields[field][i];
         }
+    }
+
+    /* Counter: canonical decimal, no leading zero. */
+    char digits[10];
+    size_t digit_count = 0u;
+    for (uint32_t rest = counter; rest != 0u; rest /= 10u) {
+        digits[digit_count++] = (char)('0' + rest % 10u);
+    }
+    message[position++] = (uint8_t)' ';
+    while (digit_count != 0u) {
+        message[position++] = (uint8_t)digits[--digit_count];
     }
 
     uint8_t seed[32];
