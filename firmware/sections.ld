@@ -1,12 +1,5 @@
-ENTRY(Reset_Handler)
-
-MEMORY
-{
-    /* Sectors 0-1. Sectors 2-4 hold the counter log and the key store
-     * and must never be part of the image. */
-    FLASH (rx)  : ORIGIN = 0x08000000, LENGTH = 32K
-    RAM   (rwx) : ORIGIN = 0x20000000, LENGTH = 128K
-}
+/* Section layout shared by the bootloader, the application and the
+ * crypto test image. Each includes this after defining MEMORY. */
 
 _estack = ORIGIN(RAM) + LENGTH(RAM);
 

@@ -82,6 +82,19 @@ class TransportTests(unittest.TestCase):
         ])
         self.assertEqual(result, APPROVED)
 
+    def test_bootloader_success_lines_are_ignored(self):
+        result = self.exchange([
+            "BOOT signer-lab bootloader\r\n", "BOOT SLOT A OK version=3\r\n",
+            "Signer firmware started\r\n", PENDING, APPROVED,
+        ])
+        self.assertEqual(result, APPROVED)
+
+    def test_failed_boot_is_reported(self):
+        for line in ("BOOT SLOT A BAD_SIGNATURE\r\n", "BOOT HALT\r\n"):
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(ValueError, "Device did not boot"):
+                    self.exchange([line])
+
     def test_firmware_fault_is_reported(self):
         with self.assertRaisesRegex(ValueError, "Firmware: FAULT"):
             self.exchange([PENDING, "FAULT pc=08000100 lr=00000000\r\n"])

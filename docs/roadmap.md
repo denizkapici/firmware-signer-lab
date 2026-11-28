@@ -39,15 +39,26 @@ Renode and CI. Threat numbers refer to [threat-model.md](threat-model.md).
   same database. Follow-ups: keep the mark on the deployment target, and
   an audit command that reports counter gaps (T7b).
 
-## 2. Secure bootloader (T10)
+## 2a. Secure bootloader — done (v0.5)
 
-- Bootloader in sectors 0–1; the application moves to slots in sectors
-  5 and 6 (128 KB each). Counter and key stay in sectors 2–4.
-- The bootloader verifies an Ed25519 signature over the application image
-  before jumping to it; an invalid image is never started.
-- A/B slots with rollback if the new image does not confirm itself.
-- Renode tests: valid image boots, tampered image is refused, power loss
-  during update recovers.
+- Bootloader in sectors 0–1; application linked at slot A
+  (`0x08020200`). Counter and key stay in sectors 2–4.
+- Signed image format with a separate firmware signing key; the bootloader
+  verifies size, Ed25519 signature and vector table before jumping.
+- `signer-lab firmware keygen | public-key | sign | verify`; the C verifier
+  and the Python tool are tested against each other.
+- Renode tests for every rejection path.
+
+## 2b. A/B updates and anti-rollback (T10)
+
+- Update command over UART that writes the inactive slot (A or B).
+- Boot state in flash: try the new slot once; the application confirms
+  itself after it started correctly, otherwise the next reset falls back
+  to the previous slot.
+- Anti-rollback: refuse images whose version is lower than the highest
+  version confirmed so far.
+- Renode tests: update, failed update falls back, power loss during the
+  update write, downgrade refused.
 
 ## 3. Standard signature format and release gate (T11)
 

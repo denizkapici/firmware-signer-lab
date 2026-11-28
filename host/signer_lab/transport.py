@@ -33,6 +33,15 @@ def _write_all(fd, data, deadline):
 
 def _is_device_notice(line):
     """Lines a (re)starting device prints that answer no command."""
+    if line.startswith("BOOT "):
+        # Bootloader output. Anything but a successful start means the
+        # application will not run and nothing will answer.
+        text = line.rstrip("\r\n")
+        if text == "BOOT HALT" or (
+            text.startswith("BOOT SLOT ") and " OK" not in text
+        ):
+            raise TransportError("Device did not boot: " + text)
+        return True
     return line == STARTUP_LINE or line.startswith(("INFO ", "WARN "))
 
 

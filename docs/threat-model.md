@@ -50,7 +50,8 @@ Assets:
 | T7a | Key store corrupted or tampered with | Mitigated: the record is checked by re-deriving the public key; a bad record blocks signing and is never replaced silently. | — |
 | T8 | Host clock moved backwards | **Not mitigated.** Expiry is checked against the host clock; the device has no trusted time. | Out of scope for now; document and monitor. |
 | T9 | Malformed or oversized input crashes the firmware | Mitigated: strict canonical parsing, 255-character line limit, interrupt-driven ring buffer with overflow detection, tests for malformed input. A CPU fault is reported over UART and the watchdog resets the device. | Roadmap 4: fuzz the parser. |
-| T10 | Malicious firmware update to the signer | **Not mitigated.** Anyone with SWD access can flash new firmware. | Roadmap 2: secure bootloader that only boots signed images. |
+| T10 | Malicious application firmware on the signer | **Mostly mitigated (v0.5).** The bootloader starts the application only with a valid signature from the firmware signing key ([secure-boot.md](secure-boot.md)). Remaining: an older signed image still boots (no anti-rollback yet), and whoever can rewrite the bootloader itself (SWD, sectors 0–1) bypasses the check. | Roadmap 2b: anti-rollback and A/B updates. Real hardware: write-protect sectors 0–1 and enable RDP. |
+| T10a | Firmware signing key stolen | Not mitigated by the device. With the development key (a file in the build directory) anyone can sign images. | Release key kept as a CI secret / offline (roadmap 3); never ship a development-key bootloader. |
 | T11 | Supply chain of the build (CI actions, dependencies) | Partly mitigated: GitHub Actions pinned by commit SHA, Dependabot, pinned Python dependencies, read-only `GITHUB_TOKEN`. | Roadmap 3: signed releases and provenance. |
 | T12 | Physical attacks (glitching, probing, decapping) | Not in scope. | A secure element (roadmap 4) raises the bar. |
 

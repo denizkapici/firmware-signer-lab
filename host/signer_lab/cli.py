@@ -8,6 +8,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import firmware_image
 from .keys import key_id, load_trusted_key, parse_public_key, save_public_key
 from .protocol import Operation, check_response, sha256_file
 from .receipt import load_receipt, save_receipt, verify_receipt
@@ -146,6 +147,47 @@ def command_verify(args):
     return EXIT_OK
 
 
+def command_firmware_keygen(args):
+    public_key = firmware_image.generate_key(args.out)
+    print(f"Firmware signing key written: {args.out} (keep it secret)")
+    print(f"Public key: {public_key.hex()}")
+    return EXIT_OK
+
+
+def command_firmware_public_key(args):
+    public_key = firmware_image.public_key_bytes(firmware_image.load_private_key(args.key))
+    if args.c_header is not None:
+        args.c_header.write_text(firmware_image.public_key_c_header(public_key), "ascii")
+    if args.out is not None:
+        args.out.write_text(public_key.hex() + "\n", "ascii")
+    print(public_key.hex())
+    return EXIT_OK
+
+
+def command_firmware_sign(args):
+    private_key = firmware_image.load_private_key(args.key)
+    image = firmware_image.build_image(args.application.read_bytes(), args.version, private_key)
+    # Check the result exactly as the bootloader will.
+    info = firmware_image.verify_image(image, firmware_image.public_key_bytes(private_key))
+    args.out.write_bytes(image)
+    print(f"Signed image written: {args.out} (version {info.version}, {info.size} bytes)")
+    return EXIT_OK
+
+
+def command_firmware_verify(args):
+    public_key = load_trusted_key(args.public_key_file)
+    info = firmware_image.verify_image(args.image.read_bytes(), public_key)
+    print(f"VALID firmware version={info.version} size={info.size} entry=0x{info.entry:08x}")
+    return EXIT_OK
+
+
+def firmware_version(text):
+    value = int(text)
+    if not 0 <= value <= firmware_image.MAX_VERSION:
+        raise argparse.ArgumentTypeError("must be between 0 and 4294967295")
+    return value
+
+
 def positive_finite(text):
     value = float(text)
     if not math.isfinite(value) or value <= 0:
@@ -206,6 +248,31 @@ def build_parser():
     verify.add_argument("--target")
     add_trust_options(verify)
     verify.set_defaults(handler=command_verify)
+
+    firmware = commands.add_parser("firmware", help="signed images for the secure bootloader")
+    firmware_commands = firmware.add_subparsers(dest="firmware_command", required=True)
+
+    keygen = firmware_commands.add_parser("keygen", help="create a firmware signing key")
+    keygen.add_argument("--out", type=Path, required=True)
+    keygen.set_defaults(handler=command_firmware_keygen)
+
+    public = firmware_commands.add_parser("public-key", help="print or export the public key")
+    public.add_argument("--key", type=Path, required=True)
+    public.add_argument("--out", type=Path, help="write the public key as hex")
+    public.add_argument("--c-header", type=Path, help="write a C header for the bootloader")
+    public.set_defaults(handler=command_firmware_public_key)
+
+    sign = firmware_commands.add_parser("sign", help="build a signed slot image")
+    sign.add_argument("application", type=Path, help="raw application binary (.bin)")
+    sign.add_argument("--key", type=Path, required=True)
+    sign.add_argument("--version", type=firmware_version, required=True)
+    sign.add_argument("--out", type=Path, required=True)
+    sign.set_defaults(handler=command_firmware_sign)
+
+    check = firmware_commands.add_parser("verify", help="check a slot image like the bootloader")
+    check.add_argument("image", type=Path)
+    check.add_argument("--public-key-file", type=Path, required=True)
+    check.set_defaults(handler=command_firmware_verify)
 
     return parser
 

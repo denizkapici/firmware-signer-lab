@@ -10,9 +10,12 @@ sysbus LoadBinary $ORIGIN/../firmware/build/blank-16k.bin 0x08008000
 sysbus LoadBinary $ORIGIN/../firmware/build/blank-16k.bin 0x0800C000
 sysbus LoadBinary $ORIGIN/../firmware/build/blank-64k.bin 0x08010000
 
-# Reload the image on every machine reset (e.g. after a watchdog reset).
+# Signed application in slot A (persists like real flash).
+sysbus LoadBinary $ORIGIN/../firmware/build/signer-slot-a.bin 0x08020000
+
+# On every reset the bootloader starts and verifies slot A.
 macro reset
 """
-    sysbus LoadELF $ORIGIN/../firmware/build/signer.elf
+    sysbus LoadELF $ORIGIN/../firmware/build/bootloader.elf
 """
 runMacro $reset

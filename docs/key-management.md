@@ -9,15 +9,15 @@ public key once and accepts only signatures that verify with it.
 
 | Region | Address | Size | Contents |
 | --- | --- | --- | --- |
-| Sectors 0–1 | `0x08000000` | 32 KB | Firmware image (`FLASH` region in `firmware/linker.ld`) |
+| Sectors 0–1 | `0x08000000` | 32 KB | Bootloader |
 | Sector 2 | `0x08008000` | 16 KB | Approval counter log A |
 | Sector 3 | `0x0800C000` | 16 KB | Key store |
 | Sector 4 | `0x08010000` | 64 KB | Approval counter log B |
-| Sectors 5–11 | `0x08020000` | 896 KB | Unused (reserved for the bootloader work, roadmap step 2) |
+| Sectors 5–6 | `0x08020000` | 2 × 128 KB | Application slots A and B ([secure-boot.md](secure-boot.md)) |
 
-The linker region ends where the data sectors start, so an image that
-grows past 32 KB fails to link instead of overwriting the counter or the
-key. (Before v0.4 the firmware region was 48 KB.)
+Neither the bootloader nor the application image overlaps sectors 2–4;
+their linker regions end before them, so an image that grows too large
+fails to link instead of overwriting the counter or the key.
 
 ## Key record (version 1)
 
@@ -115,9 +115,9 @@ prepared counter log build one with `tests/make_counter_log.py`.
 
 ## Real hardware
 
-- Flashing a new firmware image with `openocd ... program` or `st-flash
-  write` erases only the sectors the image covers; the counter and the key
-  in sectors 2–4 survive. A mass erase destroys both: the device must be
+- Flashing a new bootloader or slot image with `openocd ... program` or
+  `st-flash write` erases only the sectors the image covers; the counter
+  and the key in sectors 2–4 survive. A mass erase destroys both: the device must be
   enrolled again (and its counter restarts at 1 under a new key).
 - Enable read-out protection after enrolment, otherwise anyone with SWD
   access can read the seed:

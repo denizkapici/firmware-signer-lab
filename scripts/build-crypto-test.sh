@@ -14,7 +14,8 @@ arm-none-eabi-gcc \
     -fno-unwind-tables -fno-asynchronous-unwind-tables \
     -nostdlib \
     -Ifirmware/vendor/monocypher \
-    -T firmware/linker.ld \
+    -Lfirmware \
+    -T firmware/boot/boot.ld \
     -Wl,--gc-sections \
     -Wl,-Map=firmware/build/crypto-test.map \
     firmware/startup.s \
