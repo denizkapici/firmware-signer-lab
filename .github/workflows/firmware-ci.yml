@@ -96,7 +96,7 @@ jobs:
         run: bash scripts/build-crypto-test.sh
 
       - name: Run Renode tests
-        uses: antmicro/renode-test-action@3b43641d8ec3e35ed7aaa00b1e6f6b51bb4f935b # v6.0.0
+        uses: antmicro/renode-test-action@dbc7b9d4a8aeb4a714be9b5421849bdf8702789d # v6.1.0
         with:
           renode-revision: v1.17.0
           tests-to-run: 'tests/*.robot'
